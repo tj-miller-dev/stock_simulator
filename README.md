@@ -162,6 +162,24 @@ kubectl -n argocd get app stock-simulator     # SYNC/HEALTH status
 kubectl get pods                              # ImagePullBackOff = image never pushed
 ```
 
+**`Could not assume role with OIDC: Not authorized to perform sts:AssumeRoleWithWebIdentity`**
+means the token's `sub` claim doesn't match the role's trust policy. GitHub issues
+*immutable* subject claims that embed numeric owner and repo IDs, so the value is pinned
+in `var.github_repository_immutable`. If you rename the repo, transfer it, or point this
+at a different repo, re-read the real value and re-apply:
+
+```bash
+gh api repos/OWNER/NAME/actions/oidc/customization/sub -q .sub_claim_prefix
+```
+
+To see what a failing run actually presented, rather than guessing:
+
+```bash
+aws cloudtrail lookup-events --lookup-attributes \
+  AttributeKey=EventName,AttributeValue=AssumeRoleWithWebIdentity \
+  --max-results 3 --query 'Events[].CloudTrailEvent' --output text
+```
+
 ## Tearing everything down
 
 **Delete the Ingresses first.** The ALB is created by the load balancer controller, not by

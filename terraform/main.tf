@@ -49,8 +49,9 @@ module "gitops" {
 module "cicd" {
   source = "./modules/cicd"
 
-  cluster_name        = var.cluster_name
-  github_repository   = var.github_repository
-  deploy_branch       = var.deploy_branch
-  ecr_repository_arns = module.registry.repository_arns
+  cluster_name                = var.cluster_name
+  github_repository           = var.github_repository
+  github_repository_immutable = var.github_repository_immutable
+  deploy_branch               = var.deploy_branch
+  ecr_repository_arns         = module.registry.repository_arns
 }

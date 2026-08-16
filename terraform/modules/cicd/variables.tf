@@ -8,6 +8,15 @@ variable "github_repository" {
   type        = string
 }
 
+variable "github_repository_immutable" {
+  description = <<-EOT
+    Same repo in GitHub's immutable-subject form, owner@ownerid/name@repoid. This is
+    what actually appears in the OIDC token's `sub` claim. Read it with:
+      gh api repos/OWNER/NAME/actions/oidc/customization/sub -q .sub_claim_prefix
+  EOT
+  type        = string
+}
+
 variable "deploy_branch" {
   description = "Branch whose pushes may assume the CI role. Must match the targetRevision ArgoCD tracks in argocd/root-app.yaml."
   type        = string
