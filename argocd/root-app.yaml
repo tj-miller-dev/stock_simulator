@@ -7,7 +7,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/tj-miller-dev/stock_simulator.git
-    targetRevision: cloudify
+    targetRevision: main
     path: k8s
   destination:
     server: https://kubernetes.default.svc

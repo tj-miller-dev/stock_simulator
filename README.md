@@ -76,7 +76,7 @@ kubectl apply -f argocd/root-app.yaml
 kubectl -n argocd get applications   # watch it sync
 ```
 
-From this point on, ArgoCD watches the `cloudify` branch of this repo's `k8s/` folder and
+From this point on, ArgoCD watches the `main` branch of this repo's `k8s/` folder and
 keeps the cluster in sync automatically (`prune` + `selfHeal`) — no more manual `kubectl apply`
 for app changes, just `git push`.
 
