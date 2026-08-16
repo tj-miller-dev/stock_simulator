@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
         - name: api
-          image: stock-simulator-api:v0.2
+          image: 307946643562.dkr.ecr.us-east-1.amazonaws.com/stock-simulator-api:v0.2
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000
