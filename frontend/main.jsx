@@ -36,6 +36,9 @@ function App() {
         <button type="button" onClick={() => callEndpoint('bigrandom')}>
           Big Random
         </button>
+        <button type="button" onClick={() => callEndpoint('bigrandom')}>
+          Also Big Random
+        </button>
       </div>
       <div id="result">{result}</div>
     </div>
