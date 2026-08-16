@@ -1,0 +1,123 @@
+name: build and deploy
+
+# Only source changes trigger a build. The bump job below writes to k8s/ only,
+# which is deliberately not in this list -- that's what stops the workflow from
+# retriggering itself. (Belt and braces: pushes made with GITHUB_TOKEN don't
+# start new workflow runs either.)
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'api/**'
+      - 'frontend/**'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+
+# One deploy at a time. The bump job pushes to main, so overlapping runs would
+# race each other on the same branch.
+concurrency:
+  group: build-and-deploy
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REGISTRY: 307946643562.dkr.ecr.us-east-1.amazonaws.com
+
+permissions:
+  contents: read
+
+jobs:
+  # Figures out which services actually changed so a frontend-only commit
+  # doesn't rebuild and redeploy the api. Outputs a JSON array like ["api"],
+  # which feeds the build matrix below.
+  #
+  # A manual run builds both: there's no diff to filter on, and the case that
+  # needs it is a freshly rebuilt cluster whose ECR repos are empty.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ github.event_name == 'workflow_dispatch' && '["api","frontend"]' || steps.filter.outputs.changes }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        if: github.event_name == 'push'
+        with:
+          filters: |
+            api:
+              - 'api/**'
+            frontend:
+              - 'frontend/**'
+
+  build:
+    needs: changes
+    if: needs.changes.outputs.services != '[]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # required to mint the OIDC token for AWS
+    strategy:
+      matrix:
+        service: ${{ fromJSON(needs.changes.outputs.services) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::307946643562:role/stock-simulator-github-actions
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./${{ matrix.service }}
+          push: true
+          tags: ${{ env.ECR_REGISTRY }}/stock-simulator-${{ matrix.service }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # The ECR repos are IMMUTABLE. Attestations would push a second
+          # manifest under the same tag and get rejected -- same reason the
+          # manual docker build in the README passes --provenance=false.
+          provenance: false
+          sbom: false
+
+  # Rewrites the image tag in k8s/ and commits. That commit is the actual
+  # deploy trigger: ArgoCD is watching this path with automated sync.
+  bump:
+    needs: [changes, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Point manifests at the new images
+        env:
+          SERVICES: ${{ needs.changes.outputs.services }}
+        run: |
+          for service in $(echo "$SERVICES" | jq -r '.[]'); do
+            sed -i \
+              "s|image: .*/stock-simulator-${service}:.*|image: ${ECR_REGISTRY}/stock-simulator-${service}:${GITHUB_SHA}|" \
+              "k8s/${service}.yaml"
+          done
+          git diff --stat
+
+      - name: Commit
+        env:
+          SERVICES: ${{ needs.changes.outputs.services }}
+        run: |
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add k8s/
+          if git diff --cached --quiet; then
+            echo 'manifests already point at this commit -- nothing to do'
+            exit 0
+          fi
+          git commit -m "deploy $(echo "$SERVICES" | jq -r 'join(", ")') @ ${GITHUB_SHA:0:7}"
+          git push

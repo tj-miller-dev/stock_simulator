@@ -45,3 +45,12 @@ module "gitops" {
 
   depends_on = [module.cluster]
 }
+
+module "cicd" {
+  source = "./modules/cicd"
+
+  cluster_name        = var.cluster_name
+  github_repository   = var.github_repository
+  deploy_branch       = var.deploy_branch
+  ecr_repository_arns = module.registry.repository_arns
+}

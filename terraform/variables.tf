@@ -65,3 +65,15 @@ variable "argocd_chart_version" {
   type        = string
   default     = "10.3.3"
 }
+
+variable "github_repository" {
+  description = "GitHub repository (owner/name) whose deploy workflow may push to ECR"
+  type        = string
+  default     = "tj-miller-dev/stock_simulator"
+}
+
+variable "deploy_branch" {
+  description = "Branch that builds and deploys. Must match the targetRevision ArgoCD tracks in argocd/root-app.yaml."
+  type        = string
+  default     = "main"
+}
