@@ -33,12 +33,29 @@ data "aws_iam_policy_document" "assume_role" {
 
     # Scoped to pushes on one branch of one repo. A workflow triggered on any
     # other branch -- or in a fork, or by a pull_request event -- presents a
-    # different `sub` claim and is refused. Widen this deliberately, not by
-    # reaching for a wildcard.
+    # different `sub` claim and is refused.
+    #
+    # GitHub now issues *immutable* subject claims, which splice the numeric
+    # owner and repo IDs into the path:
+    #
+    #   repo:tj-miller-dev@204254190/stock_simulator@1335562161:ref:refs/heads/main
+    #
+    # rather than the older `repo:owner/name:ref:...`. The IDs survive renames,
+    # so a claim can't be hijacked by someone re-registering an abandoned org or
+    # repo name. Both forms are listed as exact matches: StringEquals against a
+    # list is an OR, so this keeps working whichever format GitHub sends.
+    #
+    # Do NOT collapse these into a StringLike wildcard such as
+    # `repo:tj-miller-dev*/stock_simulator*:...` -- that would also match an
+    # attacker-owned `tj-miller-dev-evil/stock_simulator`, which is precisely
+    # the attack the numeric IDs exist to prevent.
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repository}:ref:refs/heads/${var.deploy_branch}"]
+      values = [
+        "repo:${var.github_repository_immutable}:ref:refs/heads/${var.deploy_branch}",
+        "repo:${var.github_repository}:ref:refs/heads/${var.deploy_branch}",
+      ]
     }
   }
 }

@@ -72,6 +72,16 @@ variable "github_repository" {
   default     = "tj-miller-dev/stock_simulator"
 }
 
+variable "github_repository_immutable" {
+  description = <<-EOT
+    Same repo in GitHub's immutable-subject form (owner@ownerid/name@repoid), which is
+    what the OIDC token's `sub` claim actually contains. Re-read it with:
+      gh api repos/OWNER/NAME/actions/oidc/customization/sub -q .sub_claim_prefix
+  EOT
+  type        = string
+  default     = "tj-miller-dev@204254190/stock_simulator@1335562161"
+}
+
 variable "deploy_branch" {
   description = "Branch that builds and deploys. Must match the targetRevision ArgoCD tracks in argocd/root-app.yaml."
   type        = string
