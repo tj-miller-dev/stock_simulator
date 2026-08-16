@@ -1,7 +1,7 @@
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-app = FastAPI(root_path="/api")
+app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
@@ -10,21 +10,28 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Mounted under /api because the ALB ingress forwards the path unmodified
+# (unlike the old nginx ingress, ALB has no rewrite-target equivalent).
+router = APIRouter(prefix="/api")
 
-@app.get("/hello")
+
+@router.get("/hello")
 def hello():
     return "hello"
 
 
-@app.get("/world")
+@router.get("/world")
 def world():
     return "world"
 
 
-@app.get("/random")
+@router.get("/random")
 def random():
     import random
     return random.randint(1, 100)
+
+
+app.include_router(router)
 
 
 if __name__ == "__main__":
