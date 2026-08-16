@@ -17,6 +17,8 @@ module "cluster" {
   node_min_size       = var.node_min_size
   node_max_size       = var.node_max_size
   node_desired_size   = var.node_desired_size
+
+  depends_on = [module.networking]
 }
 
 module "loadbalancer" {

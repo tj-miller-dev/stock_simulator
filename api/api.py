@@ -31,6 +31,12 @@ def random():
     return random.randint(1, 100)
 
 
+@router.get("/bigrandom")
+def bigrandom():
+    import random
+    return random.randint(1, 1000)
+
+
 app.include_router(router)
 
 
