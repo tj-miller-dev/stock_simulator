@@ -49,6 +49,10 @@ def bigrandom():
     import random
     return random.randint(1, 1000)
 
+@router.get("/somethingspecial")
+def somethingspecial():
+    return "you are special"
+
 
 app.include_router(router)
 
