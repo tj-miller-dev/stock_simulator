@@ -31,6 +31,15 @@ module "loadbalancer" {
   depends_on = [module.cluster]
 }
 
+module "dns" {
+  source = "./modules/dns"
+
+  cluster_name = var.cluster_name
+  domain_name  = var.domain_name
+
+  depends_on = [module.cluster]
+}
+
 module "registry" {
   source = "./modules/registry"
 

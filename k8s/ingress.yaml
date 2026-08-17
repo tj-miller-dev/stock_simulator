@@ -7,10 +7,16 @@ metadata:
     alb.ingress.kubernetes.io/group.order: "10"
     alb.ingress.kubernetes.io/scheme: internet-facing
     alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    # No certificate-arn annotation -- the controller auto-discovers the ACM
+    # cert by matching this rule's `host` against ISSUED certs in the account,
+    # so a fresh cert ARN after every destroy/apply still just works.
 spec:
   ingressClassName: alb
   rules:
-    - http:
+    - host: cuckootrade.com
+      http:
         paths:
           - path: /api
             pathType: Prefix
@@ -29,10 +35,13 @@ metadata:
     alb.ingress.kubernetes.io/group.order: "20"
     alb.ingress.kubernetes.io/scheme: internet-facing
     alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
 spec:
   ingressClassName: alb
   rules:
-    - http:
+    - host: cuckootrade.com
+      http:
         paths:
           - path: /
             pathType: Prefix

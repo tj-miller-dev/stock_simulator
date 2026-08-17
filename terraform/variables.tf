@@ -28,6 +28,12 @@ variable "kubernetes_version" {
   default     = "1.36"
 }
 
+variable "domain_name" {
+  description = "Apex domain (registered/hosted in Route53) the app is served from"
+  type        = string
+  default     = "cuckootrade.com"
+}
+
 variable "vpc_cidr" {
   description = "CIDR block for the cluster VPC"
   type        = string

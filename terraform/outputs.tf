@@ -16,6 +16,11 @@ output "github_actions_role_arn" {
   value       = module.cicd.github_actions_role_arn
 }
 
+output "acm_certificate_arn" {
+  description = "Informational only -- the ALB controller auto-discovers this cert by matching the ingress `host` field, no manual wiring needed"
+  value       = module.dns.certificate_arn
+}
+
 output "argocd_initial_admin_password_command" {
   description = "ArgoCD's auto-generated admin password lives in a secret -- run this to read it"
   value       = "kubectl -n ${module.gitops.namespace} get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d"
