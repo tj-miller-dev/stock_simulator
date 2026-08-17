@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: 307946643562.dkr.ecr.us-east-1.amazonaws.com/stock-simulator-frontend:ac24d6ab6cd2bc3ebd6e2a507b617d6000216e5e
+          image: 307946643562.dkr.ecr.us-east-1.amazonaws.com/stock-simulator-frontend:1b1af4125479e8d3accfc43b1998f80d7fbc10f5
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 80
