@@ -182,22 +182,64 @@ aws cloudtrail lookup-events --lookup-attributes \
 
 ## Tearing everything down
 
-**Delete the Ingresses first.** The ALB is created by the load balancer controller, not by
-Terraform, so Terraform doesn't know to remove it. If the controller is torn down first the
-ALB is orphaned, and its ENIs then block subnet and VPC deletion with `DependencyViolation`
-for ~15 minutes before failing:
+Reverse the setup steps, in order. Step 4 was the last thing you did (bootstrap ArgoCD), so
+it's the first thing to undo — **before** touching the Ingress:
 
 ```bash
+# undo step 4: stop ArgoCD from managing the app
+kubectl delete -f argocd/root-app.yaml
+
+# undo the Ingress: now nothing will bring it back
 kubectl delete ingress --all
 kubectl get ingress          # wait until empty, ~1 min
+
+# undo step 1: everything else
+cd terraform
+terraform destroy
+```
+
+**The `kubectl delete -f argocd/root-app.yaml` step is the one that matters.** Without it,
+deleting the Ingress by hand doesn't work, because ArgoCD puts it right back. `syncPolicy`
+in `argocd/root-app.yaml` has `selfHeal: true`, so ArgoCD sees the Ingress missing from the
+cluster, re-applies it from `k8s/` within seconds, and the load balancer controller obediently
+builds a brand new ALB — which Terraform has no idea exists, since it never created it.
+CloudTrail from one such attempt:
+
+```
+20:50:02  DeleteLoadBalancer   ← kubectl delete ingress
+20:50:24  CreateLoadBalancer   ← ArgoCD re-synced, 22s later
+20:50:59  DeleteLoadBalancer   ← tried again
+20:51:10  CreateLoadBalancer   ← and again, 11s later
+```
+
+You can't win that race by hand — the desired state lives in git, and the reconciler always
+wins. Deleting the Application first removes the reconciler from the picture, so the Ingress
+deletion sticks and `kubectl get ingress` coming back empty is trustworthy again.
+
+`kubectl delete -f argocd/root-app.yaml` just removes ArgoCD's tracking of the app — no
+`resources-finalizer` is set on it, so it doesn't cascade-delete anything itself. The actual
+teardown of Deployments/Services/Ingress still happens the normal way, in the step after.
+
+Expect 15–20 minutes for `terraform destroy` — the node group and control plane are genuinely
+slow to delete. Don't kill it partway: an interrupted destroy can remove the NAT gateway while
+the nodes are still running, which strands the kubelets and leaves namespaces stuck
+`Terminating` forever.
+
+### Cleaning up after a destroy that already failed this way
+
+If you're reading this after already hitting the `DependencyViolation` error, the cluster and
+ArgoCD are already gone — nothing is fighting you anymore, so just delete the orphaned ALB
+directly and re-run destroy:
+
+```bash
+aws elbv2 describe-load-balancers --query 'LoadBalancers[].LoadBalancerArn' --output text
+aws elbv2 delete-load-balancer --load-balancer-arn <arn>
 
 cd terraform
 terraform destroy
 ```
 
-Expect 15–20 minutes — the node group and control plane are genuinely slow to delete. Don't
-kill it partway: an interrupted destroy can remove the NAT gateway while the nodes are still
-running, which strands the kubelets and leaves namespaces stuck `Terminating` forever.
+Give it a minute or two after the delete for the ALB's ENIs to detach before retrying destroy.
 
 The ECR repos are `force_delete = true`, so Terraform empties them for you — no need to
 delete image tags by hand (which stopped being practical once CI started tagging by SHA).

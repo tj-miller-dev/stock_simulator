@@ -25,7 +25,7 @@ variable "cluster_name" {
 variable "kubernetes_version" {
   description = "EKS control plane version. Verify this is still on standard support before applying: https://docs.aws.amazon.com/eks/latest/userguide/kubernetes-versions-standard.html"
   type        = string
-  default     = "1.33"
+  default     = "1.36"
 }
 
 variable "vpc_cidr" {
