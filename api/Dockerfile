@@ -5,7 +5,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY api.py .
+COPY api.py common.py ratelimit.py stream.py ./
+COPY engine/ ./engine/
+COPY providers/ ./providers/
 
 RUN useradd --create-home appuser
 USER appuser

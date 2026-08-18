@@ -1,2 +1,8 @@
 fastapi==0.136.0
 uvicorn[standard]==0.49.0
+# numpy is pinned hard: PCG64/standard_normal streams are stable in practice
+# but not contractually guaranteed across versions, and generation-1 output
+# must never change. Bump only alongside the golden tests (tests/test_golden.py).
+numpy==2.5.2
+# zoneinfo tz database for America/New_York on platforms without a system tzdata
+tzdata==2025.2

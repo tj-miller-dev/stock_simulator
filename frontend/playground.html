@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Playground — CuckooTrade</title>
+    <meta name="description" content="Query CuckooTrade's synthetic market data API live: any symbol, any timeframe, scenario tickers, seeds, and CSV export. No key required." />
+    <link rel="canonical" href="https://cuckootrade.com/playground" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <meta name="robots" content="index,follow" />
+    <style>
+      section { padding: 36px 0 0; }
+    </style>
+  </head>
+  <body>
+    <header class="masthead">
+      <div class="masthead-inner">
+        <span class="wordmark"><a href="/" style="color:inherit">CUCKOO<b>TRADE</b></a></span>
+        <nav>
+          <a href="/playground">Playground</a>
+          <a href="/docs">Docs</a>
+          <a href="https://github.com/tj-miller-dev/stock_simulator">GitHub</a>
+          <a class="btn btn-primary btn-sm" href="/docs#quickstart">Get started</a>
+        </nav>
+      </div>
+      <div id="ticker-ribbon" class="ribbon" aria-label="Live synthetic prices"></div>
+    </header>
+    <div class="shell">
+      <div id="root">
+        <p>The playground needs JavaScript. The API itself doesn't:
+        <code>curl 'https://cuckootrade.com/api/v1/alpaca/v2/stocks/bars?symbols=AAPL'</code></p>
+      </div>
+    </div>
+
+    <footer>
+      <div class="foot-inner">
+        <div class="foot-grid">
+          <div class="foot-brand">
+            <span class="wordmark">CUCKOO<b>TRADE</b></span>
+            <p>A free, deterministic, Alpaca-compatible market data API. Openly
+            synthetic — built for development, CI, demos, and teaching.</p>
+          </div>
+          <div class="foot-col">
+            <h4>Product</h4>
+            <a href="/playground">Playground</a>
+            <a href="/docs">Documentation</a>
+            <a href="/api">API index</a>
+            <a href="/api/docs">OpenAPI docs</a>
+          </div>
+          <div class="foot-col">
+            <h4>Developers</h4>
+            <a href="https://github.com/tj-miller-dev/stock_simulator">GitHub</a>
+            <a href="/api/openapi.json">openapi.json</a>
+            <a href="/llms.txt">llms.txt</a>
+            <a href="/docs#self-host">Self-hosting</a>
+          </div>
+          <div class="foot-col">
+            <h4>Trust</h4>
+            <a href="/docs#disclaimer">Synthetic-data disclosure</a>
+            <a href="/docs#limits">Rate limits</a>
+            <a href="https://github.com/tj-miller-dev/stock_simulator/blob/main/LICENSE">MIT license</a>
+          </div>
+        </div>
+        <div class="fine">
+          <p>© 2026 CuckooTrade. Open source — the API, the frontend, and the infrastructure that runs them.</p>
+          <p>All data on this site is synthetic. Not market data, not investment advice.</p>
+        </div>
+      </div>
+    </footer>
+    <script type="module" src="/src/playground.jsx"></script>
+  </body>
+</html>

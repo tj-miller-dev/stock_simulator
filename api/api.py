@@ -1,21 +1,51 @@
-import re
-from datetime import datetime, timedelta, timezone
+"""CuckooTrade HTTP API: provider-wire-compatible synthetic market data.
 
-from fastapi import APIRouter, FastAPI, HTTPException
+Path scheme: /api/v1/{provider}/<provider's own path>. Everything through the
+provider segment is CuckooTrade's namespace (the v1 versions this API's
+surface; the `generation` param versions the data). Everything after it
+mimics that provider's wire format, so its SDKs work with only a base-URL
+override. Providers live in providers/ -- one module per provider, each
+exposing `router` and `INDEX_ENTRY` -- and mount alongside each other
+without touching existing paths.
+
+Wire-compat responses carry no extra body fields -- strict SDK parsers must
+never choke -- so the synthetic marking rides in X-Cuckoo-* headers instead.
+Cuckoo-native endpoints (/api, /api/v1/stream) carry full metadata in the
+body.
+
+Error messages teach: they state the valid grammar and include a working
+example, because errors are read at the exact moment someone (or some agent)
+is stuck. Error *shape* follows the provider being mimicked (Alpaca's
+{"code","message"}, Alpha Vantage's 200-with-"Error Message", Polygon's
+{"status":"ERROR",...}).
+"""
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
-# The docs endpoints hang off the app, not off the router below, so the router's
-# /api prefix does not move them. Left at their defaults they sit at /docs and
-# /openapi.json, which the ALB routes to the frontend -- so they have to be
-# prefixed by hand. openapi_url matters as much as docs_url: the Swagger page
-# fetches the schema from it, and pointing it at the frontend renders an empty
-# "Failed to load API definition" page.
+import providers
+from common import EXAMPLE
+from engine import GENERATION
+from ratelimit import TokenBucketLimiter, client_ip
+from stream import router as stream_router
+
+DOCS_URL = "https://cuckootrade.com/docs"
+DISCLAIMER = (
+    "All data is synthetic. CuckooTrade exists for exercising code paths -- "
+    "development, CI, demos, tutorials -- never for validating trading "
+    "strategies: a profitable backtest on synthetic data means nothing."
+)
+
+# The docs endpoints hang off the app, not off the /api-prefixed routes, so
+# they must be prefixed by hand or the ALB routes them to the frontend.
 app = FastAPI(
+    title="CuckooTrade",
+    description=DISCLAIMER,
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
-    # Unused today (no OAuth2 on this API) but it defaults to /docs/oauth2-redirect,
-    # which would land on the frontend the moment auth is ever added.
     swagger_ui_oauth2_redirect_url="/api/docs/oauth2-redirect",
 )
 
@@ -26,150 +56,123 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mounted under /api because the ALB ingress forwards the path unmodified
-# (unlike the old nginx ingress, ALB has no rewrite-target equivalent).
-router = APIRouter(prefix="/api")
+limiter = TokenBucketLimiter()
 
 
-@router.get("/hello")
-def hello():
-    return "hello"
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    detail = exc.detail
+    if not isinstance(detail, dict):
+        detail = {"code": 40010000, "message": str(detail)}
+    return JSONResponse(status_code=exc.status_code, content=detail)
 
 
-@router.get("/world")
-def world():
-    return "world"
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    problems = "; ".join(
+        f"{'.'.join(str(p) for p in err['loc'][1:])}: {err['msg']}" for err in exc.errors()
+    )
+    return JSONResponse(
+        status_code=400,
+        content={
+            "code": 40010001,
+            "message": f"invalid request ({problems}) -- working example: {EXAMPLE}",
+        },
+    )
 
 
-@router.get("/random")
-def random():
-    import random
-    return random.randint(1, 100)
+@app.middleware("http")
+async def cuckoo_middleware(request: Request, call_next):
+    """Synthetic marking on every response, plus keyless per-IP rate limiting
+    (health checks exempt so kubelet probes never starve behind a scan)."""
+    path = request.url.path
+    limited = path.startswith("/api") and path != "/api/health"
+    if limited:
+        allowed, remaining, reset = limiter.check(client_ip(request))
+        if not allowed:
+            response = JSONResponse(
+                status_code=429,
+                content={
+                    "code": 42910000,
+                    "message": "rate limit exceeded: 60 requests/minute sustained "
+                    "(burst 120) per address, no key required. Back off using the "
+                    "RateLimit-Reset header.",
+                },
+            )
+        else:
+            response = await call_next(request)
+        response.headers["RateLimit-Limit"] = str(int(limiter.capacity))
+        response.headers["RateLimit-Remaining"] = str(max(0, remaining))
+        response.headers["RateLimit-Reset"] = str(reset)
+    else:
+        response = await call_next(request)
+    response.headers["X-Cuckoo-Synthetic"] = "true"
+    response.headers["X-Cuckoo-Generation"] = str(GENERATION)
+    response.headers["X-Cuckoo-Docs"] = DOCS_URL
+    return response
 
 
-@router.get("/bigrandom")
-def bigrandom():
-    import random
-    return random.randint(1, 1000)
+@app.get("/api/health")
+def health():
+    return {"status": "ok"}
 
 
-@router.get("/randomlist")
-def randomlist(seed: int | None = None):
-    import random
-    rng = random.Random(seed)
-    return [rng.randint(1, 100) for _ in range(10)]
+@app.get("/api")
+def index():
+    """Machine-readable index: enough for an agent that lands here with no
+    other context to make its first successful call."""
+    return {
+        "name": "CuckooTrade",
+        "synthetic": True,
+        "api_version": 1,
+        "generation": GENERATION,
+        "tagline": "Deterministic synthetic market data. No key, no signup.",
+        "disclaimer": DISCLAIMER,
+        "path_scheme": (
+            "/api/v1/{provider}/<provider's own path> mimics that provider's "
+            "wire format (point its SDK there via a base-URL override); "
+            "/api/v1/... without a provider segment is CuckooTrade-native. "
+            "The path version covers this API's surface; the `generation` "
+            "parameter versions the data itself."
+        ),
+        "docs": {
+            "site": DOCS_URL,
+            "openapi": "/api/openapi.json",
+            "swagger": "/api/docs",
+            "llms": "https://cuckootrade.com/llms.txt",
+        },
+        "determinism": (
+            "Identical requests return identical bars, forever, within a "
+            "generation. Add &seed=<anything> for a different but equally "
+            "deterministic dataset."
+        ),
+        "magic_tickers": {
+            "CRASH": "sharp ~25% crash mid-month, slow recovery",
+            "MOON": "parabolic monthly pump, sharp correction",
+            "FLAT": "zero-range bars, constant price",
+            "GAPPY": "large overnight gaps most days",
+            "HALTS": "missing minute bars during intraday halt windows",
+            "SPIKEY": "single-minute fat-finger wicks",
+            "PENNY": "sub-dollar prices, high volatility",
+            "CHOPPY": "high volatility, zero net drift",
+        },
+        "providers": providers.INDEX,
+        "native_endpoints": [
+            {
+                "method": "GET",
+                "path": "/api/v1/stream",
+                "purpose": "SSE ticks; clock=demo is an always-open synthetic "
+                "session, clock=real follows the NYSE calendar",
+                "example": "/api/v1/stream?symbols=CUCKOO,CRASH",
+            },
+        ],
+        "rate_limit": "60 req/min sustained, burst 120, per address, no key.",
+    }
 
 
-# Mocks Alpaca's GET /v2/stocks/bars (https://data.alpaca.markets/v2/stocks/bars).
-# Same path/query shape as the real endpoint, so a consumer can switch between
-# this and Alpaca by swapping only the base URL.
-_TIMEFRAME_RE = re.compile(r"^(\d+)(Min|Hour|Day|Week|Month)$", re.IGNORECASE)
-_TIMEFRAME_UNIT_DELTAS = {
-    "min": timedelta(minutes=1),
-    "hour": timedelta(hours=1),
-    "day": timedelta(days=1),
-    "week": timedelta(weeks=1),
-    "month": timedelta(days=30),
-}
-BARS_DEFAULT_LIMIT = 1000
-BARS_MAX_LIMIT = 10_000
-BARS_DEFAULT_LOOKBACK = timedelta(days=30)
-BARS_MAX_SYMBOLS = 50
-
-
-def _parse_timeframe(timeframe: str) -> timedelta:
-    match = _TIMEFRAME_RE.match(timeframe.strip())
-    if not match or int(match.group(1)) <= 0:
-        raise HTTPException(status_code=422, detail=f"invalid timeframe: {timeframe!r}")
-    amount, unit = match.groups()
-    return int(amount) * _TIMEFRAME_UNIT_DELTAS[unit.lower()]
-
-
-def _parse_start(start: str) -> datetime:
-    text = start.strip()
-    if text.endswith("Z"):
-        text = text[:-1] + "+00:00"
-    try:
-        parsed = datetime.fromisoformat(text)
-    except ValueError:
-        raise HTTPException(status_code=422, detail=f"invalid start: {start!r}")
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
-
-
-def _generate_bars(rng, start_ts, step, limit, now):
-    bars = []
-    price = rng.uniform(100, 200)
-    prev_close = price
-    timestamp = start_ts
-
-    while timestamp <= now and len(bars) < limit:
-        if bars:
-            change = rng.uniform(-0.03, 0.03)
-            price = prev_close * (1 + change)
-        open_price = prev_close
-        close_price = price
-        high_price = max(open_price, close_price) * 1.005
-        low_price = min(open_price, close_price) * 0.995
-
-        bars.append({
-            "c": round(close_price, 4),
-            "h": round(high_price, 4),
-            "l": round(low_price, 4),
-            "n": rng.randint(1_000, 500_000),
-            "o": round(open_price, 4),
-            "t": timestamp.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "v": rng.randint(1_000_000, 50_000_000),
-            "vw": round((open_price + high_price + low_price + close_price) / 4, 6),
-        })
-
-        prev_close = close_price
-        timestamp += step
-
-    return bars
-
-
-@router.get("/v2/stocks/bars")
-def stock_bars(
-    symbols: str,
-    timeframe: str = "1Day",
-    start: str | None = None,
-    limit: int | None = None,
-    seed: int | None = None,
-):
-    import random
-
-    step = _parse_timeframe(timeframe)
-    now = datetime.now(timezone.utc)
-    start_ts = _parse_start(start) if start else now - BARS_DEFAULT_LOOKBACK
-    capped_limit = BARS_DEFAULT_LIMIT if limit is None else max(0, min(limit, BARS_MAX_LIMIT))
-
-    symbol_list = [s.strip() for s in symbols.split(",") if s.strip()]
-    if len(symbol_list) > BARS_MAX_SYMBOLS:
-        raise HTTPException(
-            status_code=422,
-            detail=f"too many symbols: {len(symbol_list)} (max {BARS_MAX_SYMBOLS})",
-        )
-
-    bars = {}
-    for symbol in symbol_list:
-        # Seeding per-symbol (rather than sharing one Random across the whole
-        # request) keeps a symbol's series the same regardless of what other
-        # symbols are requested alongside it or in what order.
-        symbol_seed = f"{seed}:{symbol}" if seed is not None else None
-        rng = random.Random(symbol_seed)
-        bars[symbol] = _generate_bars(rng, start_ts, step, capped_limit, now)
-
-    return {"bars": bars, "next_page_token": None}
-
-
-@router.get("/somethingspecial")
-def somethingspecial():
-    return "you are special"
-
-
-app.include_router(router)
+for provider_router in providers.ROUTERS:
+    app.include_router(provider_router)
+app.include_router(stream_router)
 
 
 if __name__ == "__main__":
