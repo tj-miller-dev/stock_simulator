@@ -1,21 +1,52 @@
+"""CuckooTrade HTTP API: Alpaca-wire-compatible synthetic market data.
+
+The compatibility contract (V1_SPEC 3.1): alpaca-py's historical data client,
+pointed here via url_override, works unmodified. Wire-compat responses carry
+no extra body fields -- strict SDK parsers must never choke -- so the
+synthetic marking rides in X-Cuckoo-* headers instead. Cuckoo-native
+endpoints (/api, /api/v1/stream) carry full metadata in the body.
+
+Error messages teach: they state the valid grammar and include a working
+example, because errors are read at the exact moment someone (or some agent)
+is stuck.
+"""
+
+import base64
 import re
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
-# The docs endpoints hang off the app, not off the router below, so the router's
-# /api prefix does not move them. Left at their defaults they sit at /docs and
-# /openapi.json, which the ALB routes to the frontend -- so they have to be
-# prefixed by hand. openapi_url matters as much as docs_url: the Swagger page
-# fetches the schema from it, and pointing it at the frontend renders an empty
-# "Failed to load API definition" page.
+from engine import GENERATION, bars_range, latest_bar, parse_timeframe
+from ratelimit import TokenBucketLimiter, client_ip
+from stream import router as stream_router
+
+DOCS_URL = "https://cuckootrade.com/docs"
+DISCLAIMER = (
+    "All data is synthetic. CuckooTrade exists for exercising code paths -- "
+    "development, CI, demos, tutorials -- never for validating trading "
+    "strategies: a profitable backtest on synthetic data means nothing."
+)
+
+BARS_DEFAULT_LIMIT = 1000
+BARS_MAX_LIMIT = 10_000
+BARS_DEFAULT_LOOKBACK = timedelta(days=30)
+BARS_MAX_SYMBOLS = 50
+_SYMBOL_RE = re.compile(r"^[A-Za-z][A-Za-z0-9.\-]{0,11}$")
+
+EXAMPLE = "/api/v2/stocks/bars?symbols=AAPL,CRASH&timeframe=1Day&start=2026-07-01"
+
+# The docs endpoints hang off the app, not off the /api-prefixed routes, so
+# they must be prefixed by hand or the ALB routes them to the frontend.
 app = FastAPI(
+    title="CuckooTrade",
+    description=DISCLAIMER,
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
-    # Unused today (no OAuth2 on this API) but it defaults to /docs/oauth2-redirect,
-    # which would land on the frontend the moment auth is ever added.
     swagger_ui_oauth2_redirect_url="/api/docs/oauth2-redirect",
 )
 
@@ -26,150 +57,340 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mounted under /api because the ALB ingress forwards the path unmodified
-# (unlike the old nginx ingress, ALB has no rewrite-target equivalent).
-router = APIRouter(prefix="/api")
+limiter = TokenBucketLimiter()
 
 
-@router.get("/hello")
-def hello():
-    return "hello"
+def api_error(status: int, code: int, message: str) -> None:
+    raise HTTPException(status_code=status, detail={"code": code, "message": message})
 
 
-@router.get("/world")
-def world():
-    return "world"
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    detail = exc.detail
+    if not isinstance(detail, dict):
+        detail = {"code": 40010000, "message": str(detail)}
+    return JSONResponse(status_code=exc.status_code, content=detail)
 
 
-@router.get("/random")
-def random():
-    import random
-    return random.randint(1, 100)
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    problems = "; ".join(
+        f"{'.'.join(str(p) for p in err['loc'][1:])}: {err['msg']}" for err in exc.errors()
+    )
+    return JSONResponse(
+        status_code=400,
+        content={
+            "code": 40010001,
+            "message": f"invalid request ({problems}) -- working example: {EXAMPLE}",
+        },
+    )
 
 
-@router.get("/bigrandom")
-def bigrandom():
-    import random
-    return random.randint(1, 1000)
+@app.middleware("http")
+async def cuckoo_middleware(request: Request, call_next):
+    """Synthetic marking on every response, plus keyless per-IP rate limiting
+    (health checks exempt so kubelet probes never starve behind a scan)."""
+    path = request.url.path
+    limited = path.startswith("/api") and path != "/api/health"
+    if limited:
+        allowed, remaining, reset = limiter.check(client_ip(request))
+        if not allowed:
+            response = JSONResponse(
+                status_code=429,
+                content={
+                    "code": 42910000,
+                    "message": "rate limit exceeded: 60 requests/minute sustained "
+                    "(burst 120) per address, no key required. Back off using the "
+                    "RateLimit-Reset header.",
+                },
+            )
+        else:
+            response = await call_next(request)
+        response.headers["RateLimit-Limit"] = str(int(limiter.capacity))
+        response.headers["RateLimit-Remaining"] = str(max(0, remaining))
+        response.headers["RateLimit-Reset"] = str(reset)
+    else:
+        response = await call_next(request)
+    response.headers["X-Cuckoo-Synthetic"] = "true"
+    response.headers["X-Cuckoo-Generation"] = str(GENERATION)
+    response.headers["X-Cuckoo-Docs"] = DOCS_URL
+    return response
 
 
-@router.get("/randomlist")
-def randomlist(seed: int | None = None):
-    import random
-    rng = random.Random(seed)
-    return [rng.randint(1, 100) for _ in range(10)]
+def parse_symbols(raw: str, cap: int = BARS_MAX_SYMBOLS) -> list[str]:
+    symbols = [s.strip().upper() for s in raw.split(",") if s.strip()]
+    if not symbols:
+        api_error(400, 40010001, f"symbols is required -- working example: {EXAMPLE}")
+    if len(symbols) > cap:
+        api_error(400, 40010001, f"too many symbols: {len(symbols)} (max {cap})")
+    for s in symbols:
+        if not _SYMBOL_RE.match(s):
+            api_error(
+                400,
+                40010001,
+                f"invalid symbol {s!r}: letters, digits, dot and dash, max 12 chars. "
+                f"Any well-formed symbol works -- unknown ones get a stable "
+                f"hash-derived personality. Working example: {EXAMPLE}",
+            )
+    # Deduplicate preserving nothing but membership: responses key by symbol,
+    # and pagination iterates alphabetically like Alpaca.
+    return sorted(set(symbols))
 
 
-# Mocks Alpaca's GET /v2/stocks/bars (https://data.alpaca.markets/v2/stocks/bars).
-# Same path/query shape as the real endpoint, so a consumer can switch between
-# this and Alpaca by swapping only the base URL.
-_TIMEFRAME_RE = re.compile(r"^(\d+)(Min|Hour|Day|Week|Month)$", re.IGNORECASE)
-_TIMEFRAME_UNIT_DELTAS = {
-    "min": timedelta(minutes=1),
-    "hour": timedelta(hours=1),
-    "day": timedelta(days=1),
-    "week": timedelta(weeks=1),
-    "month": timedelta(days=30),
-}
-BARS_DEFAULT_LIMIT = 1000
-BARS_MAX_LIMIT = 10_000
-BARS_DEFAULT_LOOKBACK = timedelta(days=30)
-BARS_MAX_SYMBOLS = 50
-
-
-def _parse_timeframe(timeframe: str) -> timedelta:
-    match = _TIMEFRAME_RE.match(timeframe.strip())
-    if not match or int(match.group(1)) <= 0:
-        raise HTTPException(status_code=422, detail=f"invalid timeframe: {timeframe!r}")
-    amount, unit = match.groups()
-    return int(amount) * _TIMEFRAME_UNIT_DELTAS[unit.lower()]
-
-
-def _parse_start(start: str) -> datetime:
-    text = start.strip()
+def parse_time(value: str, param: str) -> datetime:
+    text = value.strip()
     if text.endswith("Z"):
         text = text[:-1] + "+00:00"
     try:
         parsed = datetime.fromisoformat(text)
     except ValueError:
-        raise HTTPException(status_code=422, detail=f"invalid start: {start!r}")
+        api_error(
+            400,
+            40010001,
+            f"invalid {param} {value!r}: use RFC-3339 or YYYY-MM-DD, e.g. "
+            f"{param}=2026-07-01 or {param}=2026-07-01T13:30:00Z",
+        )
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
 
 
-def _generate_bars(rng, start_ts, step, limit, now):
-    bars = []
-    price = rng.uniform(100, 200)
-    prev_close = price
-    timestamp = start_ts
-
-    while timestamp <= now and len(bars) < limit:
-        if bars:
-            change = rng.uniform(-0.03, 0.03)
-            price = prev_close * (1 + change)
-        open_price = prev_close
-        close_price = price
-        high_price = max(open_price, close_price) * 1.005
-        low_price = min(open_price, close_price) * 0.995
-
-        bars.append({
-            "c": round(close_price, 4),
-            "h": round(high_price, 4),
-            "l": round(low_price, 4),
-            "n": rng.randint(1_000, 500_000),
-            "o": round(open_price, 4),
-            "t": timestamp.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "v": rng.randint(1_000_000, 50_000_000),
-            "vw": round((open_price + high_price + low_price + close_price) / 4, 6),
-        })
-
-        prev_close = close_price
-        timestamp += step
-
-    return bars
+def parse_common(timeframe, start, end, limit, seed, generation):
+    try:
+        tf = parse_timeframe(timeframe)
+    except ValueError as e:
+        api_error(400, 40010001, f"{e} -- working example: {EXAMPLE}")
+    if generation != GENERATION:
+        api_error(
+            400,
+            40010001,
+            f"unknown generation {generation}: this deployment serves generation "
+            f"{GENERATION}. Omit the parameter for the current generation.",
+        )
+    now = datetime.now(timezone.utc)
+    end_dt = parse_time(end, "end") if end else now
+    start_dt = parse_time(start, "start") if start else end_dt - BARS_DEFAULT_LOOKBACK
+    if limit is not None and not (1 <= limit <= BARS_MAX_LIMIT):
+        api_error(
+            400,
+            40010001,
+            f"invalid limit {limit}: 1 to {BARS_MAX_LIMIT}. limit counts total bars "
+            f"across all requested symbols; page through next_page_token for more.",
+        )
+    return tf, start_dt, end_dt, (limit or BARS_DEFAULT_LIMIT), seed or ""
 
 
-@router.get("/v2/stocks/bars")
+def encode_token(symbol: str, last_t: str) -> str:
+    return base64.urlsafe_b64encode(f"v1|{symbol}|{last_t}".encode()).decode()
+
+
+def decode_token(token: str) -> tuple[str, str]:
+    try:
+        version, symbol, last_t = base64.urlsafe_b64decode(token.encode()).decode().split("|")
+        assert version == "v1"
+        return symbol, last_t
+    except Exception:
+        api_error(
+            400,
+            40010001,
+            "invalid page_token: pass the next_page_token value from the previous "
+            "response, unmodified.",
+        )
+
+
+def paginate_bars(symbols, tf, start_dt, end_dt, limit, seed, page_token, descending):
+    """Alpaca pagination semantics: symbols alphabetically, `limit` counts
+    total bars across symbols, next_page_token resumes exactly after the last
+    bar served."""
+    resume_symbol, resume_t = (None, None)
+    if page_token:
+        resume_symbol, resume_t = decode_token(page_token)
+
+    bars_by_symbol: dict[str, list] = {}
+    budget = limit
+    next_token = None
+    for symbol in symbols:
+        if resume_symbol is not None and symbol < resume_symbol:
+            bars_by_symbol[symbol] = []
+            continue
+        sym_start, sym_end = start_dt, end_dt
+        if symbol == resume_symbol and resume_t is not None:
+            edge = parse_time(resume_t, "page_token") + (
+                timedelta(seconds=-1) if descending else timedelta(seconds=1)
+            )
+            if descending:
+                sym_end = min(sym_end, edge)
+            else:
+                sym_start = max(sym_start, edge)
+        # One-bar lookahead distinguishes "exactly fit" from "more remain".
+        bars, truncated = bars_range(
+            symbol, tf, sym_start, sym_end, seed=seed,
+            max_bars=budget + 1, descending=descending,
+        )
+        if len(bars) > budget:
+            served = bars[:budget]
+            bars_by_symbol[symbol] = served
+            next_token = encode_token(symbol, served[-1]["t"])
+            budget = 0
+            break
+        bars_by_symbol[symbol] = bars
+        budget -= len(bars)
+    return bars_by_symbol, next_token
+
+
+@app.get("/api/v2/stocks/bars")
 def stock_bars(
     symbols: str,
     timeframe: str = "1Day",
     start: str | None = None,
+    end: str | None = None,
     limit: int | None = None,
-    seed: int | None = None,
+    page_token: str | None = None,
+    sort: str = "asc",
+    adjustment: str | None = None,  # accepted, ignored: no corporate actions in V1
+    feed: str | None = None,        # accepted, ignored: there is only one feed here
+    asof: str | None = None,        # accepted, ignored
+    currency: str | None = None,    # accepted, ignored
+    seed: str | None = None,        # Cuckoo extension: alternate universe
+    generation: int = GENERATION,   # Cuckoo extension: pin generator version
 ):
-    import random
-
-    step = _parse_timeframe(timeframe)
-    now = datetime.now(timezone.utc)
-    start_ts = _parse_start(start) if start else now - BARS_DEFAULT_LOOKBACK
-    capped_limit = BARS_DEFAULT_LIMIT if limit is None else max(0, min(limit, BARS_MAX_LIMIT))
-
-    symbol_list = [s.strip() for s in symbols.split(",") if s.strip()]
-    if len(symbol_list) > BARS_MAX_SYMBOLS:
-        raise HTTPException(
-            status_code=422,
-            detail=f"too many symbols: {len(symbol_list)} (max {BARS_MAX_SYMBOLS})",
-        )
-
-    bars = {}
-    for symbol in symbol_list:
-        # Seeding per-symbol (rather than sharing one Random across the whole
-        # request) keeps a symbol's series the same regardless of what other
-        # symbols are requested alongside it or in what order.
-        symbol_seed = f"{seed}:{symbol}" if seed is not None else None
-        rng = random.Random(symbol_seed)
-        bars[symbol] = _generate_bars(rng, start_ts, step, capped_limit, now)
-
-    return {"bars": bars, "next_page_token": None}
+    symbol_list = parse_symbols(symbols)
+    tf, start_dt, end_dt, capped_limit, seed = parse_common(
+        timeframe, start, end, limit, seed, generation
+    )
+    if sort not in ("asc", "desc"):
+        api_error(400, 40010001, f"invalid sort {sort!r}: use sort=asc or sort=desc")
+    bars, next_token = paginate_bars(
+        symbol_list, tf, start_dt, end_dt, capped_limit, seed, page_token, sort == "desc"
+    )
+    response = JSONResponse({"bars": bars, "next_page_token": next_token})
+    _maybe_cache_forever(response, end, end_dt)
+    return response
 
 
-@router.get("/somethingspecial")
-def somethingspecial():
-    return "you are special"
+@app.get("/api/v2/stocks/bars/latest")
+def stock_bars_latest(
+    symbols: str,
+    timeframe: str = "1Min",
+    seed: str | None = None,
+    generation: int = GENERATION,
+):
+    symbol_list = parse_symbols(symbols)
+    tf, _, _, _, seed = parse_common(timeframe, None, None, None, seed, generation)
+    return {
+        "bars": {
+            s: bar for s in symbol_list if (bar := latest_bar(s, tf, seed=seed)) is not None
+        }
+    }
 
 
-app.include_router(router)
+@app.get("/api/v2/stocks/{symbol}/bars")
+def stock_bars_single(
+    symbol: str,
+    timeframe: str = "1Day",
+    start: str | None = None,
+    end: str | None = None,
+    limit: int | None = None,
+    page_token: str | None = None,
+    sort: str = "asc",
+    adjustment: str | None = None,
+    feed: str | None = None,
+    asof: str | None = None,
+    currency: str | None = None,
+    seed: str | None = None,
+    generation: int = GENERATION,
+):
+    (sym,) = parse_symbols(symbol, cap=1)
+    tf, start_dt, end_dt, capped_limit, seed = parse_common(
+        timeframe, start, end, limit, seed, generation
+    )
+    if sort not in ("asc", "desc"):
+        api_error(400, 40010001, f"invalid sort {sort!r}: use sort=asc or sort=desc")
+    bars, next_token = paginate_bars(
+        [sym], tf, start_dt, end_dt, capped_limit, seed, page_token, sort == "desc"
+    )
+    response = JSONResponse(
+        {"bars": bars[sym], "symbol": sym, "next_page_token": next_token}
+    )
+    _maybe_cache_forever(response, end, end_dt)
+    return response
+
+
+def _maybe_cache_forever(response, end_param, end_dt) -> None:
+    """History never changes here: a fully-specified window that ended in the
+    past is immutable, so say so and let any cache keep it forever."""
+    if end_param and end_dt < datetime.now(timezone.utc) - timedelta(days=1):
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+
+
+@app.get("/api/health")
+def health():
+    return {"status": "ok"}
+
+
+@app.get("/api")
+def index():
+    """Machine-readable index: enough for an agent that lands here with no
+    other context to make its first successful call."""
+    return {
+        "name": "CuckooTrade",
+        "synthetic": True,
+        "generation": GENERATION,
+        "tagline": "100% real fake market data. No key, no signup, deterministic.",
+        "disclaimer": DISCLAIMER,
+        "docs": {
+            "site": DOCS_URL,
+            "openapi": "/api/openapi.json",
+            "swagger": "/api/docs",
+            "llms": "https://cuckootrade.com/llms.txt",
+        },
+        "determinism": (
+            "Identical requests return identical bars, forever, within a "
+            "generation. Add &seed=<anything> for an alternate universe."
+        ),
+        "magic_tickers": {
+            "CRASH": "sharp ~25% crash mid-month, slow recovery",
+            "MOON": "parabolic monthly pump, sharp correction",
+            "FLAT": "zero-range bars, constant price",
+            "GAPPY": "large overnight gaps most days",
+            "HALTS": "missing minute bars during intraday halt windows",
+            "SPIKEY": "single-minute fat-finger wicks",
+            "PENNY": "sub-dollar prices, high volatility",
+            "CHOPPY": "high volatility, zero net drift",
+        },
+        "endpoints": [
+            {
+                "method": "GET",
+                "path": "/api/v2/stocks/bars",
+                "purpose": "Alpaca-compatible historical bars (point alpaca-py "
+                "here via url_override='https://cuckootrade.com/api')",
+                "example": EXAMPLE,
+            },
+            {
+                "method": "GET",
+                "path": "/api/v2/stocks/bars/latest",
+                "purpose": "latest completed bar per symbol",
+                "example": "/api/v2/stocks/bars/latest?symbols=AAPL,SPY",
+            },
+            {
+                "method": "GET",
+                "path": "/api/v2/stocks/{symbol}/bars",
+                "purpose": "single-symbol variant",
+                "example": "/api/v2/stocks/AAPL/bars?timeframe=15Min",
+            },
+            {
+                "method": "GET",
+                "path": "/api/v1/stream",
+                "purpose": "SSE ticks; clock=demo is an always-open synthetic "
+                "session, clock=real follows the NYSE calendar",
+                "example": "/api/v1/stream?symbols=CUCKOO,CRASH",
+            },
+        ],
+        "rate_limit": "60 req/min sustained, burst 120, per address, no key.",
+    }
+
+
+app.include_router(stream_router)
 
 
 if __name__ == "__main__":
