@@ -22,12 +22,19 @@ This doc assumes you're rebuilding from nothing (e.g. after a `terraform destroy
 
 Installed locally: Terraform >= 1.9, AWS CLI v2, `kubectl`, Docker.
 
-`terraform/terraform.tfvars` (gitignored — never commit this) with your AWS credentials:
+`terraform/terraform.tfvars` (gitignored — never commit this) with your AWS credentials and your own IP:
 
 ```hcl
-aws_access_key = "..."
-aws_secret_key = "..."
+aws_access_key      = "..."
+aws_secret_key      = "..."
+public_access_cidrs = ["x.x.x.x/32"]
 ```
+
+Find your current public IP with `curl https://checkip.amazonaws.com`. This restricts the EKS
+API's public endpoint (what `kubectl`/`terraform apply` use from your machine) to just you —
+nodes and in-cluster controllers always reach it privately, regardless of this setting. If your
+IP changes later, update this and re-apply, or you'll lose `kubectl`/`terraform` access to the
+cluster until you do.
 
 ## 1. Provision infrastructure
 

@@ -28,6 +28,12 @@ variable "kubernetes_version" {
   default     = "1.36"
 }
 
+variable "public_access_cidrs" {
+  description = "CIDR blocks allowed to reach the EKS API's public endpoint -- e.g. your IP as a /32. Nodes and in-cluster controllers always reach the API privately via endpoint_private_access, so this only gates kubectl/terraform from outside the VPC. Find your current IP with: curl https://checkip.amazonaws.com"
+  type        = list(string)
+  sensitive   = true
+}
+
 variable "domain_name" {
   description = "Apex domain (registered/hosted in Route53) the app is served from"
   type        = string

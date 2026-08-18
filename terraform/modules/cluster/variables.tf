@@ -13,6 +13,11 @@ variable "subnet_ids" {
   type        = list(string)
 }
 
+variable "public_access_cidrs" {
+  description = "CIDR blocks allowed to reach the EKS API's public endpoint"
+  type        = list(string)
+}
+
 variable "node_instance_types" {
   type = list(string)
 }

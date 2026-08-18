@@ -74,6 +74,7 @@ _TIMEFRAME_UNIT_DELTAS = {
 BARS_DEFAULT_LIMIT = 1000
 BARS_MAX_LIMIT = 10_000
 BARS_DEFAULT_LOOKBACK = timedelta(days=30)
+BARS_MAX_SYMBOLS = 50
 
 
 def _parse_timeframe(timeframe: str) -> timedelta:
@@ -144,8 +145,15 @@ def stock_bars(
     start_ts = _parse_start(start) if start else now - BARS_DEFAULT_LOOKBACK
     capped_limit = BARS_DEFAULT_LIMIT if limit is None else max(0, min(limit, BARS_MAX_LIMIT))
 
+    symbol_list = [s.strip() for s in symbols.split(",") if s.strip()]
+    if len(symbol_list) > BARS_MAX_SYMBOLS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"too many symbols: {len(symbol_list)} (max {BARS_MAX_SYMBOLS})",
+        )
+
     bars = {}
-    for symbol in [s.strip() for s in symbols.split(",") if s.strip()]:
+    for symbol in symbol_list:
         # Seeding per-symbol (rather than sharing one Random across the whole
         # request) keeps a symbol's series the same regardless of what other
         # symbols are requested alongside it or in what order.

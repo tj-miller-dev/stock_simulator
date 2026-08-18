@@ -7,7 +7,7 @@ const API_BASE = import.meta.env.VITE_API_BASE ?? ''
 function App() {
   const [result, setResult] = useState('Result will appear here')
   const [seed, setSeed] = useState('')
-  const [symbol, setSymbol] = useState('SPY')
+  const [symbol, setSymbol] = useState('SPY, FOO, BAR')
   const [timeframe, setTimeframe] = useState('1Day')
   const [start, setStart] = useState('')
 

@@ -18,6 +18,8 @@ module "cluster" {
   node_max_size       = var.node_max_size
   node_desired_size   = var.node_desired_size
 
+  public_access_cidrs = var.public_access_cidrs
+
   depends_on = [module.networking]
 }
 

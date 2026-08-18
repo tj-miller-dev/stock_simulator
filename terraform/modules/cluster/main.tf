@@ -22,8 +22,10 @@ resource "aws_eks_cluster" "this" {
   version  = var.kubernetes_version
 
   vpc_config {
-    subnet_ids             = var.subnet_ids
-    endpoint_public_access = true
+    subnet_ids              = var.subnet_ids
+    endpoint_public_access  = true
+    endpoint_private_access = true
+    public_access_cidrs     = var.public_access_cidrs
   }
 
   # Native EKS Access Entry API -- grants whoever/whatever runs `terraform
