@@ -1,6 +1,8 @@
+import { initNav } from './nav.js'
 import { initRibbon } from './ribbon.js'
 import './theme.css'
 
+initNav()
 initRibbon()
 
 for (const btn of document.querySelectorAll('button.copy[data-copy-target]')) {

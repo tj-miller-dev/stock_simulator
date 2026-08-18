@@ -2,9 +2,11 @@ import { StrictMode, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import LineChart from './chart/LineChart.jsx'
 import { PUBLIC_BASE, barsUrl, fetchBars, isoDaysAgo, seriesColor } from './lib/api.js'
+import { initNav } from './nav.js'
 import { initRibbon } from './ribbon.js'
 import './theme.css'
 
+initNav()
 initRibbon()
 
 const MAGIC = ['CRASH', 'MOON', 'FLAT', 'GAPPY', 'HALTS', 'SPIKEY', 'PENNY', 'CHOPPY']
@@ -98,7 +100,7 @@ function App() {
         </p>
         <div className="panel">
           <div className="pg-controls">
-            <div style={{ gridColumn: 'span 2' }}>
+            <div className="pg-wide">
               <label htmlFor="symbols">symbols (comma-separated, ≤50)</label>
               <input id="symbols" value={form.symbols} onChange={set('symbols')} />
             </div>
@@ -158,7 +160,7 @@ function App() {
             </div>
             <LineChart series={series} drawKey={drawKey} />
           </div>
-          <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 10 }}>
             <button type="button" className="ghost" onClick={() => downloadCsv(result.bars)}>
               Download CSV
             </button>

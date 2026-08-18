@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import LineChart from './chart/LineChart.jsx'
 import Sparkline from './chart/Sparkline.jsx'
 import { PUBLIC_BASE, barsUrl, fetchBars, isoDaysAgo } from './lib/api.js'
+import { initNav } from './nav.js'
 import { initRibbon } from './ribbon.js'
 import './theme.css'
 
@@ -160,6 +161,7 @@ function mount(id, node) {
   if (el) createRoot(el).render(<StrictMode>{node}</StrictMode>)
 }
 
+initNav()
 initRibbon()
 
 mount('island-hero', <HeroChart />)

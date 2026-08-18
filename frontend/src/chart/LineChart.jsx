@@ -10,10 +10,38 @@ const INK = {
   axis: 'var(--axis)',
 }
 
-const W = 760
+// The viewBox is sized to the container's real pixel width rather than a fixed
+// 760, so axis labels render at their stated size instead of being scaled down
+// with everything else -- a 760-unit box squeezed into a 340px phone shrinks
+// 11px type to 5px.
+const W_FALLBACK = 760
 const H = 340
-const MARGIN = { top: 16, right: 76, bottom: 28, left: 64 }
-const PW = W - MARGIN.left - MARGIN.right
+const NARROW_AT = 560
+const MARGIN_WIDE = { top: 16, right: 76, bottom: 28, left: 64 }
+// Phones lose the end-of-line price labels, so the right margin collapses.
+const MARGIN_NARROW = { top: 12, right: 14, bottom: 24, left: 54 }
+
+/** Tracks the rendered width of a node via a callback ref (the node appears
+ *  only after data arrives, so a plain ref + mount effect would miss it). */
+function useElementWidth() {
+  const [node, setNode] = useState(null)
+  const [width, setWidth] = useState(0)
+
+  useEffect(() => {
+    if (!node) return
+    const measure = () => setWidth(Math.round(node.getBoundingClientRect().width))
+    measure()
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', measure)
+      return () => window.removeEventListener('resize', measure)
+    }
+    const ro = new ResizeObserver(measure)
+    ro.observe(node)
+    return () => ro.disconnect()
+  }, [node])
+
+  return [setNode, width]
+}
 
 function niceTicks(min, max, count) {
   if (min === max) return [min]
@@ -31,8 +59,9 @@ function niceTicks(min, max, count) {
   return ticks
 }
 
-function formatTickDate(iso, subDay) {
-  return subDay ? `${iso.slice(5, 10)} ${iso.slice(11, 16)}` : iso.slice(0, 10)
+function formatTickDate(iso, subDay, terse = false) {
+  if (subDay) return terse ? iso.slice(11, 16) : `${iso.slice(5, 10)} ${iso.slice(11, 16)}`
+  return terse ? iso.slice(5, 10) : iso.slice(0, 10)
 }
 
 function layoutEndLabels(entries, minGap) {
@@ -49,10 +78,22 @@ function layoutEndLabels(entries, minGap) {
  */
 export default function LineChart({ series, drawKey, height = H }) {
   const [hovered, setHovered] = useState(null)
+  const [wrapRef, measured] = useElementWidth()
   const pathRefs = useRef([])
 
   const drawn = series.filter((s) => s.bars.length > 0).slice(0, 8)
 
+  // Geometry follows the container. Before the first measurement the fallback
+  // keeps the markup sane; the observer corrects it on the same frame.
+  const W = Math.max(260, measured || W_FALLBACK)
+  const narrow = W < NARROW_AT
+  const MARGIN = narrow ? MARGIN_NARROW : MARGIN_WIDE
+  const PW = W - MARGIN.left - MARGIN.right
+  const chartH = narrow ? Math.min(height, Math.max(180, Math.round(height * 0.72))) : height
+  const fs = narrow ? 10 : 11
+
+  // Re-draw whenever the data changes -- or the geometry does, since a resize
+  // rewrites every path and would otherwise leave a stale dash offset behind.
   useEffect(() => {
     for (const el of pathRefs.current) {
       if (!el) continue
@@ -65,7 +106,7 @@ export default function LineChart({ series, drawKey, height = H }) {
       el.style.animation = 'draw 1.1s ease-out forwards'
     }
     setHovered(null)
-  }, [drawKey])
+  }, [drawKey, W, chartH])
 
   if (drawn.length === 0) {
     return <div className="chart-empty">no bars for this window</div>
@@ -80,21 +121,23 @@ export default function LineChart({ series, drawKey, height = H }) {
   const pad = (rawMax - rawMin) * 0.08 || rawMax * 0.05 || 1
   const yMin = rawMin - pad
   const yMax = rawMax + pad
-  const ph = height - MARGIN.top - MARGIN.bottom
+  const ph = chartH - MARGIN.top - MARGIN.bottom
   const yAt = (v) => MARGIN.top + (1 - (v - yMin) / (yMax - yMin)) * ph
 
-  const yTicks = niceTicks(yMin, yMax, 4).filter((t) => t >= yMin && t <= yMax)
+  const yTicks = niceTicks(yMin, yMax, narrow ? 3 : 4).filter((t) => t >= yMin && t <= yMax)
   const longest = drawn.reduce((a, b) => (a.bars.length >= b.bars.length ? a : b))
   const subDay =
     longest.bars.length > 1 &&
     new Date(longest.bars[1].t) - new Date(longest.bars[0].t) < 86400e3
-  const tickCount = Math.min(5, pointCount)
+  // Fewer, inward-anchored ticks on a phone so no date hangs past the plot.
+  const tickCount = Math.min(narrow ? 3 : 5, pointCount)
   const xTickIdx = Array.from({ length: tickCount }, (_, k) =>
     Math.round((k / (tickCount - 1 || 1)) * (pointCount - 1)),
   )
 
+  // No gutter for them on a phone -- the legend and tooltip carry the values.
   const endLabels =
-    drawn.length <= 4
+    !narrow && drawn.length <= 4
       ? layoutEndLabels(
           drawn.map((s) => {
             const last = s.bars[s.bars.length - 1]
@@ -122,40 +165,49 @@ export default function LineChart({ series, drawKey, height = H }) {
     }
   }
 
+  // The tip is centred on the cursor, so it is held clear of both edges by
+  // roughly its own half-width -- a bigger share of a narrow chart.
+  const tipInset = narrow ? 27 : 14
   const hoverX = hovered == null ? null : xAt(hovered)
-  const hoverPct = hoverX == null ? 0 : Math.min(86, Math.max(14, (hoverX / W) * 100))
+  const hoverPct =
+    hoverX == null ? 0 : Math.min(100 - tipInset, Math.max(tipInset, (hoverX / W) * 100))
 
   return (
-    <div className="chart-wrap">
+    <div className="chart-wrap" ref={wrapRef}>
       <svg
-        viewBox={`0 0 ${W} ${height}`}
-        width="100%"
-        height="auto"
+        viewBox={`0 0 ${W} ${chartH}`}
         role="img"
         aria-label={`Price chart: ${drawn.map((s) => s.name).join(', ')}`}
-        style={{ display: 'block' }}
       >
         {yTicks.map((t) => (
           <g key={t}>
             <line x1={MARGIN.left} x2={W - MARGIN.right} y1={yAt(t)} y2={yAt(t)} stroke={INK.gridline} strokeWidth="1" />
-            <text x={MARGIN.left - 8} y={yAt(t)} textAnchor="end" dominantBaseline="middle" fontSize="11" fill={INK.muted} fontFamily="var(--mono)">
+            <text x={MARGIN.left - (narrow ? 6 : 8)} y={yAt(t)} textAnchor="end" dominantBaseline="middle" fontSize={fs} fill={INK.muted} fontFamily="var(--mono)">
               {formatPrice(t)}
             </text>
           </g>
         ))}
 
-        <line x1={MARGIN.left} x2={MARGIN.left} y1={MARGIN.top} y2={height - MARGIN.bottom} stroke={INK.axis} strokeWidth="1" />
-        <line x1={MARGIN.left} x2={W - MARGIN.right} y1={height - MARGIN.bottom} y2={height - MARGIN.bottom} stroke={INK.axis} strokeWidth="1" />
+        <line x1={MARGIN.left} x2={MARGIN.left} y1={MARGIN.top} y2={chartH - MARGIN.bottom} stroke={INK.axis} strokeWidth="1" />
+        <line x1={MARGIN.left} x2={W - MARGIN.right} y1={chartH - MARGIN.bottom} y2={chartH - MARGIN.bottom} stroke={INK.axis} strokeWidth="1" />
 
-        {xTickIdx.map((i) => (
-          <text key={i} x={xAt(i)} y={height - MARGIN.bottom + 16} textAnchor="middle" fontSize="11" fill={INK.muted} fontFamily="var(--mono)">
-            {longest.bars[i] ? formatTickDate(longest.bars[i].t, subDay) : ''}
+        {xTickIdx.map((i, k) => (
+          <text
+            key={i}
+            x={xAt(i)}
+            y={chartH - MARGIN.bottom + (narrow ? 14 : 16)}
+            textAnchor={k === 0 ? 'start' : k === xTickIdx.length - 1 ? 'end' : 'middle'}
+            fontSize={fs}
+            fill={INK.muted}
+            fontFamily="var(--mono)"
+          >
+            {longest.bars[i] ? formatTickDate(longest.bars[i].t, subDay, narrow) : ''}
           </text>
         ))}
 
         {drawn.length === 1 && (
           <path
-            d={`${drawn[0].bars.map((b, i) => `${i === 0 ? 'M' : 'L'}${xAt(i)},${yAt(b.c)}`).join(' ')} L${xAt(drawn[0].bars.length - 1)},${height - MARGIN.bottom} L${xAt(0)},${height - MARGIN.bottom} Z`}
+            d={`${drawn[0].bars.map((b, i) => `${i === 0 ? 'M' : 'L'}${xAt(i)},${yAt(b.c)}`).join(' ')} L${xAt(drawn[0].bars.length - 1)},${chartH - MARGIN.bottom} L${xAt(0)},${chartH - MARGIN.bottom} Z`}
             fill={drawn[0].color}
             opacity="0.07"
             stroke="none"
@@ -177,25 +229,29 @@ export default function LineChart({ series, drawKey, height = H }) {
         ))}
 
         {endLabels.map((l) => (
-          <text key={l.name} x={W - MARGIN.right + 8} y={l.y} fontSize="11" dominantBaseline="middle" fontFamily="var(--mono)">
+          <text key={l.name} x={W - MARGIN.right + 8} y={l.y} fontSize={fs} dominantBaseline="middle" fontFamily="var(--mono)">
             <tspan fill={l.color}>{'— '}</tspan>
             <tspan fill={INK.secondary}>{l.text}</tspan>
           </text>
         ))}
 
         {hoverX != null && (
-          <line x1={hoverX} x2={hoverX} y1={MARGIN.top} y2={height - MARGIN.bottom} stroke={INK.axis} strokeWidth="1" />
+          <line x1={hoverX} x2={hoverX} y1={MARGIN.top} y2={chartH - MARGIN.bottom} stroke={INK.axis} strokeWidth="1" />
         )}
 
+        {/* Hit area for pointer and keyboard scrubbing. Touch never fires a
+            leave event, so lifting the finger is what clears the tooltip. */}
         <rect
           x={MARGIN.left}
           y={MARGIN.top}
           width={PW}
-          height={height - MARGIN.top - MARGIN.bottom}
+          height={chartH - MARGIN.top - MARGIN.bottom}
           fill="transparent"
           tabIndex={0}
           onPointerMove={(e) => setHovered(indexFromPointer(e))}
           onPointerLeave={() => setHovered(null)}
+          onPointerUp={(e) => e.pointerType !== 'mouse' && setHovered(null)}
+          onPointerCancel={() => setHovered(null)}
           onKeyDown={onKeyDown}
           onFocus={() => setHovered((i) => (i == null ? 0 : i))}
           onBlur={() => setHovered(null)}
