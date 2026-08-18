@@ -1,9 +1,9 @@
 # CuckooTrade
 
-**Market data for everything before production.** A free, deterministic,
-Alpaca-compatible API serving openly synthetic data — no key, no signup — for
-development, CI, demos, and teaching. Live at
-**[cuckootrade.com](https://cuckootrade.com)**.
+**Market data for everything before production.** A free, deterministic API
+serving openly synthetic data — no key, no signup — over the wire formats of
+Alpaca, Alpha Vantage, and Polygon. For development, CI, demos, and teaching.
+Live at **[cuckootrade.com](https://cuckootrade.com)**.
 
 ```bash
 curl 'https://cuckootrade.com/api/v1/alpaca/v2/stocks/bars?symbols=AAPL,CRASH&timeframe=1Day&start=2026-07-01'
@@ -20,9 +20,17 @@ client = StockHistoricalDataClient(
 ```
 
 Paths are provider-namespaced and versioned: `/api/v1/{provider}/…` mimics
-that provider's wire format (Alpaca first; more planned), while
-`/api/v1/stream` and friends are CuckooTrade-native. The path `v1` versions
-the API surface; the `generation` parameter versions the data.
+that provider's wire format, while `/api/v1/stream` and friends are
+CuckooTrade-native. The path `v1` versions the API surface; the `generation`
+parameter versions the data. Three providers are live, all serving the same
+deterministic world:
+
+```bash
+# Alpha Vantage format (intraday included — premium on the real API, free here)
+curl 'https://cuckootrade.com/api/v1/alphavantage/query?function=TIME_SERIES_DAILY&symbol=IBM'
+# Polygon aggregates format
+curl 'https://cuckootrade.com/api/v1/polygon/v2/aggs/ticker/MSFT/range/1/day/2026-07-01/2026-08-01'
+```
 
 ## Why
 
