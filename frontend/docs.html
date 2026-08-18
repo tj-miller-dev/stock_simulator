@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Docs — CuckooTrade</title>
+    <meta name="description" content="CuckooTrade API documentation: Alpaca-compatible bars endpoint, determinism guarantee, scenario tickers, SSE streaming, rate limits. No API key required." />
+    <link rel="canonical" href="https://cuckootrade.com/docs" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <style>
+      section { padding: 48px 0 0; }
+      .doc-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+      .doc-table th, .doc-table td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+      .doc-table th { font-family: var(--mono); font-weight: 400; color: var(--ink-3); font-size: 0.75rem; text-transform: uppercase; }
+      .doc-table td:first-child { font-family: var(--mono); color: var(--ink); white-space: nowrap; }
+      .doc-table code { color: var(--accent); }
+      .doc-pre { margin: 0; padding: 14px 16px; overflow-x: auto; background: var(--bg-inset); font-size: 0.82rem; line-height: 1.6; }
+      section p code, section li code { background: var(--bg-inset); padding: 1px 5px; border-radius: 3px; font-size: 0.85em; }
+      .toc { font-family: var(--mono); font-size: 0.85rem; display: flex; flex-wrap: wrap; gap: 8px 20px; padding: 22px 0 0; }
+      h2.mono { font-size: 1.25rem; letter-spacing: 0; }
+    </style>
+  </head>
+  <body>
+    <header class="masthead">
+      <div class="masthead-inner">
+        <span class="wordmark"><a href="/" style="color:inherit">CUCKOO<b>TRADE</b></a></span>
+        <nav>
+          <a href="/playground">Playground</a>
+          <a href="/docs">Docs</a>
+          <a href="https://github.com/tj-miller-dev/stock_simulator">GitHub</a>
+          <a class="btn btn-primary btn-sm" href="#quickstart">Get started</a>
+        </nav>
+      </div>
+      <div id="ticker-ribbon" class="ribbon" aria-label="Live synthetic prices"></div>
+    </header>
+
+    <div class="shell">
+      <nav class="toc" aria-label="Contents">
+        <a href="#quickstart">quickstart</a>
+        <a href="#structure">structure</a>
+        <a href="#bars">alpaca</a>
+        <a href="#alphavantage">alpha vantage</a>
+        <a href="#polygon">polygon</a>
+        <a href="#determinism">determinism</a>
+        <a href="#magic">scenario tickers</a>
+        <a href="#stream">stream</a>
+        <a href="#limits">rate limits</a>
+        <a href="#self-host">self-hosting</a>
+        <a href="#disclaimer">disclaimer</a>
+      </nav>
+
+      <section id="quickstart">
+        <h2>Quickstart</h2>
+        <p>No key, no signup. This works right now, from anywhere:</p>
+        <div class="panel" style="position:relative">
+          <button type="button" class="copy" style="position:absolute;top:10px;right:10px" data-copy-target="#qs">copy</button>
+          <pre class="doc-pre" id="qs">curl 'https://cuckootrade.com/api/v1/alpaca/v2/stocks/bars?symbols=AAPL,CRASH&amp;timeframe=1Day&amp;start=2026-07-01'</pre>
+        </div>
+        <p>
+          Using <a href="https://github.com/alpacahq/alpaca-py">alpaca-py</a>? Pass
+          <code>url_override="https://cuckootrade.com/api/v1/alpaca"</code> and any
+          non-empty strings as API keys — they're never checked. The API is also
+          self-describing: <a href="/api">/api</a> returns a machine-readable index,
+          and <a href="/llms.txt">/llms.txt</a> summarizes everything for AI coding
+          tools.
+        </p>
+      </section>
+
+      <section id="structure">
+        <h2>API structure &amp; versioning</h2>
+        <p>
+          Every endpoint lives under <code>/api/v1/</code>, and provider-compatible
+          surfaces add the provider's name to the path:
+        </p>
+        <div class="panel">
+          <pre class="doc-pre">/api/v1/{provider}/&lt;the provider's own path&gt;   ← mimics that provider's wire format
+/api/v1/&lt;endpoint&gt;                            ← CuckooTrade-native (e.g. /api/v1/stream)</pre>
+        </div>
+        <p>
+          Everything through the provider segment is CuckooTrade's namespace;
+          everything after it replicates the provider exactly, which is why a
+          client only needs its base URL changed. The <code>v2</code> in
+          <code>/api/v1/alpaca/v2/stocks/bars</code> is Alpaca's own version, not
+          ours. Three providers are live:
+        </p>
+        <table class="doc-table">
+          <tr><th>provider</th><th>base URL</th><th>stands in for</th></tr>
+          <tr><td><a href="#bars">alpaca</a></td><td><code>https://cuckootrade.com/api/v1/alpaca</code></td><td>data.alpaca.markets</td></tr>
+          <tr><td><a href="#alphavantage">alphavantage</a></td><td><code>https://cuckootrade.com/api/v1/alphavantage</code></td><td>www.alphavantage.co</td></tr>
+          <tr><td><a href="#polygon">polygon</a></td><td><code>https://cuckootrade.com/api/v1/polygon</code></td><td>api.polygon.io</td></tr>
+        </table>
+        <p>
+          Two things are versioned, on purpose: the <b>path version</b>
+          (<code>v1</code>) covers the API surface — paths, parameters, error
+          shapes — while the <b><code>generation</code> parameter</b> covers the
+          data itself. A surface change bumps the path; a data change becomes a new
+          generation, and old generations stay queryable (see
+          <a href="#determinism">determinism</a>).
+        </p>
+      </section>
+
+      <section id="bars">
+        <span class="eyebrow">Provider surface · Alpaca</span>
+        <h2 class="mono">GET /api/v1/alpaca/v2/stocks/bars</h2>
+        <p>
+          Alpaca-compatible historical OHLCV bars. Regular sessions only
+          (09:30–16:00 ET, NYSE calendar — weekends and US market holidays have no
+          bars; half-days trade as full sessions). Only <em>completed</em> bars are
+          served, so any response you receive is permanently reproducible.
+        </p>
+        <table class="doc-table">
+          <tr><th>param</th><th>meaning</th></tr>
+          <tr><td>symbols</td><td>required; comma-separated, max 50. Any well-formed symbol works: curated tickers (AAPL, SPY, …) sit at plausible price levels, everything else gets a stable hash-derived personality.</td></tr>
+          <tr><td>timeframe</td><td><code>[1-59]Min</code>, <code>[1-23]Hour</code>, <code>1Day</code>, <code>1Week</code>, <code>[1,2,3,4,6,12]Month</code>. Default <code>1Day</code>. Coarser bars aggregate exactly from finer ones.</td></tr>
+          <tr><td>start / end</td><td>RFC-3339 or YYYY-MM-DD, inclusive. Defaults: last 30 days. Weeks/months clipped by the window are dropped, not served partial.</td></tr>
+          <tr><td>limit</td><td>total bars across all symbols, 1–10000 (default 1000). More data ⇒ <code>next_page_token</code>; pass it back as <code>page_token</code>.</td></tr>
+          <tr><td>sort</td><td><code>asc</code> (default) or <code>desc</code>.</td></tr>
+          <tr><td>seed</td><td><b>cuckoo extension.</b> Any string; returns a different but equally deterministic dataset with the same statistical character. Omit it for the shared default dataset.</td></tr>
+          <tr><td>generation</td><td><b>cuckoo extension.</b> Pins the generator version (currently 1). Responses carry <code>X-Cuckoo-Generation</code>.</td></tr>
+          <tr><td>adjustment, feed, asof, currency</td><td>accepted and ignored, for Alpaca client compatibility. No corporate actions exist in generation 1.</td></tr>
+        </table>
+        <p>
+          Also available: <code>/api/v1/alpaca/v2/stocks/{symbol}/bars</code>
+          (single symbol) and
+          <code>/api/v1/alpaca/v2/stocks/bars/latest?symbols=…</code> (last
+          completed bar). Errors are Alpaca-shaped
+          <code>{"code", "message"}</code>, and every message states the valid
+          grammar plus a working example.
+        </p>
+      </section>
+
+      <section id="alphavantage">
+        <span class="eyebrow">Provider surface · Alpha Vantage</span>
+        <h2 class="mono">GET /api/v1/alphavantage/query</h2>
+        <p>
+          Alpha Vantage's single-endpoint format, faithfully — including its
+          quirks: values are strings, series are keyed newest-first, and errors
+          come back as HTTP 200 with an <code>"Error Message"</code> body,
+          because that is how the real API reports them. <code>apikey</code>
+          accepts anything, including nothing. Intraday is a premium endpoint
+          on Alpha Vantage's free tier; here it's free like everything else.
+        </p>
+        <div class="panel" style="position:relative">
+          <button type="button" class="copy" style="position:absolute;top:10px;right:10px" data-copy-target="#av-ex">copy</button>
+          <pre class="doc-pre" id="av-ex">curl 'https://cuckootrade.com/api/v1/alphavantage/query?function=TIME_SERIES_DAILY&amp;symbol=IBM'</pre>
+        </div>
+        <table class="doc-table">
+          <tr><th>param</th><th>meaning</th></tr>
+          <tr><td>function</td><td>required: <code>TIME_SERIES_INTRADAY</code>, <code>TIME_SERIES_DAILY</code>, <code>TIME_SERIES_WEEKLY</code>, <code>TIME_SERIES_MONTHLY</code>, or <code>GLOBAL_QUOTE</code>.</td></tr>
+          <tr><td>symbol</td><td>required; one symbol. Scenario tickers work: <code>symbol=CRASH</code>.</td></tr>
+          <tr><td>interval</td><td>intraday only, required there: <code>1min</code>, <code>5min</code>, <code>15min</code>, <code>30min</code>, <code>60min</code>. Labels are interval-end times in US/Eastern.</td></tr>
+          <tr><td>outputsize</td><td><code>compact</code> (default, last 100 points) or <code>full</code> (~20 years daily; trailing 30 days intraday).</td></tr>
+          <tr><td>month</td><td>intraday only: <code>YYYY-MM</code> serves that calendar month.</td></tr>
+          <tr><td>apikey, adjusted, extended_hours</td><td>accepted and ignored.</td></tr>
+          <tr><td>seed / generation</td><td><b>cuckoo extensions</b>, same semantics as everywhere else.</td></tr>
+        </table>
+        <p>
+          Two deliberate deviations from the real thing: only <em>completed</em>
+          bars are served (no partial current day/week/month row — determinism
+          requires it), and sessions are regular-trading-hours only.
+        </p>
+      </section>
+
+      <section id="polygon">
+        <span class="eyebrow">Provider surface · Polygon</span>
+        <h2 class="mono">GET /api/v1/polygon/v2/aggs/ticker/{ticker}/range/…</h2>
+        <p>
+          Polygon's aggregates format: the same envelope
+          (<code>ticker, queryCount, resultsCount, adjusted, results, status,
+          request_id, count</code>), bars as <code>{v, vw, o, c, h, l, t, n}</code>
+          with <code>t</code> in Unix milliseconds, <code>next_url</code> cursor
+          pagination, and <code>{"status": "ERROR"}</code> error bodies.
+          <code>apiKey</code> is accepted and ignored, and <code>status</code> is
+          always <code>OK</code> — synthetic data is never delayed.
+        </p>
+        <div class="panel" style="position:relative">
+          <button type="button" class="copy" style="position:absolute;top:10px;right:10px" data-copy-target="#pg-ex">copy</button>
+          <pre class="doc-pre" id="pg-ex">curl 'https://cuckootrade.com/api/v1/polygon/v2/aggs/ticker/MSFT/range/1/day/2026-07-01/2026-08-01'</pre>
+        </div>
+        <table class="doc-table">
+          <tr><th>path / param</th><th>meaning</th></tr>
+          <tr><td>range/{multiplier}/{timespan}</td><td><code>minute</code> (1–59), <code>hour</code> (1–23), <code>day</code>, <code>week</code>, <code>month</code> (1, 2, 3, 4, 6, 12), <code>quarter</code> (1, 2, 4), <code>year</code>.</td></tr>
+          <tr><td>{from} / {to}</td><td><code>YYYY-MM-DD</code> (inclusive dates) or Unix millisecond timestamps.</td></tr>
+          <tr><td>sort</td><td><code>asc</code> (default) or <code>desc</code>.</td></tr>
+          <tr><td>limit</td><td>1–50000 (default 5000); past it, follow <code>next_url</code>.</td></tr>
+          <tr><td>adjusted, apiKey</td><td>accepted and ignored — no corporate actions exist, so adjusted and unadjusted are the same numbers.</td></tr>
+          <tr><td>seed / generation</td><td><b>cuckoo extensions</b>; carried through <code>next_url</code> automatically.</td></tr>
+        </table>
+        <p>
+          Also available:
+          <code>/api/v1/polygon/v2/aggs/ticker/{ticker}/prev</code> — the previous
+          session's daily bar, with Polygon's extra <code>"T"</code> field.
+          <code>request_id</code> is a hash of the request rather than a random
+          id, so identical requests stay byte-identical.
+        </p>
+      </section>
+
+      <section id="determinism">
+        <h2>The determinism guarantee</h2>
+        <p>
+          Every bar is a pure function of (symbol, timestamp, generation, seed).
+          Identical requests return identical bytes, forever, within a generation —
+          there is no database and no randomness at request time, which is also why
+          fully-specified historical responses ship
+          <code>Cache-Control: immutable</code>. If the generator ever improves,
+          that becomes generation 2; generation 1 stays queryable, so committed
+          fixtures never break.
+        </p>
+      </section>
+
+      <section id="magic">
+        <h2>Scenario tickers</h2>
+        <p>
+          Reserved symbols with scripted, calendar-anchored behavior. Every pattern
+          appears within any 30-day window, so a demo or test never catches a quiet
+          stretch. Responses stay schema-valid — the stress is in the values, never
+          in malformed fields.
+        </p>
+        <table class="doc-table">
+          <tr><th>ticker</th><th>behavior</th></tr>
+          <tr><td>CRASH</td><td>sharp ~25% crash mid-month, slow grind recovery</td></tr>
+          <tr><td>MOON</td><td>parabolic run-up peaking late in the month, hard correction</td></tr>
+          <tr><td>FLAT</td><td>zero-range bars pinned at $100.00 — breaks naive autoscaling</td></tr>
+          <tr><td>GAPPY</td><td>±5–15% overnight gaps most days, quiet sessions</td></tr>
+          <tr><td>HALTS</td><td>minute bars absent during intraday halt windows</td></tr>
+          <tr><td>SPIKEY</td><td>single-minute wicks that spike and instantly revert</td></tr>
+          <tr><td>PENNY</td><td>~$0.30 prices, four decimals, high volatility</td></tr>
+          <tr><td>CHOPPY</td><td>high volatility, zero net drift</td></tr>
+        </table>
+      </section>
+
+      <section id="stream">
+        <span class="eyebrow">CuckooTrade native</span>
+        <h2 class="mono">GET /api/v1/stream (SSE)</h2>
+        <p>
+          Server-sent events — curl-able, no WebSocket library needed. It's what
+          drives the live ticker at the top of every page here. Two clocks:
+          <code>clock=demo</code> (default) is an always-open synthetic session whose
+          price is a pure function of wall time, so every viewer sees the same tick
+          at the same instant; <code>clock=real</code> follows the NYSE calendar and
+          emits completed 1-minute bars, staying silent (heartbeats only) while the
+          market is closed. Max 10 symbols and 5 concurrent streams per address;
+          streams close after 15 minutes — reconnect freely.
+        </p>
+        <div class="panel" style="position:relative">
+          <button type="button" class="copy" style="position:absolute;top:10px;right:10px" data-copy-target="#sse">copy</button>
+          <pre class="doc-pre" id="sse">curl -N 'https://cuckootrade.com/api/v1/stream?symbols=CUCKOO,CRASH'</pre>
+        </div>
+      </section>
+
+      <section id="limits">
+        <h2>Rate limits</h2>
+        <p>
+          60 requests per minute sustained per address, with burst headroom to 120 —
+          no key required. Responses carry
+          <code>RateLimit-Limit / -Remaining / -Reset</code> headers, and a 429
+          tells you exactly how long to back off. Limits are enforced per replica,
+          so the effective ceiling may be somewhat higher than advertised.
+        </p>
+      </section>
+
+      <section id="self-host">
+        <h2>Self-hosting</h2>
+        <p>
+          The API is stateless and MIT-licensed. If your CI pipeline shouldn't
+          depend on an external service, run your own instance: clone
+          <a href="https://github.com/tj-miller-dev/stock_simulator">the repo</a> and
+          start it with <code>pip install -r api/requirements.txt &amp;&amp;
+          python api/api.py</code>, or pull the prebuilt container image published
+          alongside the repo. Determinism means a local instance serves
+          byte-identical data to cuckootrade.com for the same generation.
+        </p>
+      </section>
+
+      <section id="disclaimer">
+        <div class="disclaimer">
+          <b>All data is synthetic.</b> Every response is generated and marked with
+          <code>X-Cuckoo-Synthetic: true</code>. CuckooTrade exists to exercise
+          code paths — development, CI, demos, teaching. It is not market data,
+          must never inform a real trade, and is not a backtesting tool: a strategy
+          that profits against synthetic data has learned the generator, not the
+          market.
+        </div>
+      </section>
+    </div>
+
+    <footer>
+      <div class="foot-inner">
+        <div class="foot-grid">
+          <div class="foot-brand">
+            <span class="wordmark">CUCKOO<b>TRADE</b></span>
+            <p>A free, deterministic, Alpaca-compatible market data API. Openly
+            synthetic — built for development, CI, demos, and teaching.</p>
+          </div>
+          <div class="foot-col">
+            <h4>Product</h4>
+            <a href="/playground">Playground</a>
+            <a href="/docs">Documentation</a>
+            <a href="/api">API index</a>
+            <a href="/api/docs">OpenAPI docs</a>
+          </div>
+          <div class="foot-col">
+            <h4>Developers</h4>
+            <a href="https://github.com/tj-miller-dev/stock_simulator">GitHub</a>
+            <a href="/api/openapi.json">openapi.json</a>
+            <a href="/llms.txt">llms.txt</a>
+            <a href="/docs#self-host">Self-hosting</a>
+          </div>
+          <div class="foot-col">
+            <h4>Trust</h4>
+            <a href="/docs#disclaimer">Synthetic-data disclosure</a>
+            <a href="/docs#limits">Rate limits</a>
+            <a href="https://github.com/tj-miller-dev/stock_simulator/blob/main/LICENSE">MIT license</a>
+          </div>
+        </div>
+        <div class="fine">
+          <p>© 2026 CuckooTrade. Open source — the API, the frontend, and the infrastructure that runs them.</p>
+          <p>All data on this site is synthetic. Not market data, not investment advice.</p>
+        </div>
+      </div>
+    </footer>
+    <script type="module" src="/src/docs.js"></script>
+  </body>
+</html>
