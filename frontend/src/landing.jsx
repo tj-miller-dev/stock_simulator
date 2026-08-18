@@ -1,8 +1,9 @@
-import { StrictMode, useEffect, useRef, useState } from 'react'
+import { StrictMode, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import LineChart from './chart/LineChart.jsx'
 import Sparkline from './chart/Sparkline.jsx'
-import { API_BASE, PUBLIC_BASE, barsUrl, fetchBars, formatPrice, isoDaysAgo } from './lib/api.js'
+import { PUBLIC_BASE, barsUrl, fetchBars, isoDaysAgo } from './lib/api.js'
+import { initRibbon } from './ribbon.js'
 import './theme.css'
 
 const HERO_TICKERS = ['CUCKOO', 'CRASH', 'MOON', 'GAPPY', 'HALTS', 'SPIKEY']
@@ -72,40 +73,6 @@ function HeroChart() {
         <LineChart series={[{ name: ticker, color: 'var(--accent)', bars }]} drawKey={`${ticker}:${drawKey}`} />
       )}
       <pre className="curl-line"><span className="prompt">$</span> {curl} <CopyButton text={curl} /></pre>
-    </div>
-  )
-}
-
-function TickerStrip() {
-  const [prices, setPrices] = useState({})
-  const prev = useRef({})
-
-  useEffect(() => {
-    const source = new EventSource(`${API_BASE}/v1/stream?symbols=CUCKOO,CRASH,MOON,PENNY`)
-    source.addEventListener('tick', (e) => {
-      const { S, p } = JSON.parse(e.data)
-      setPrices((old) => {
-        prev.current[S] = old[S]?.p
-        return { ...old, [S]: { p, dir: old[S] ? Math.sign(p - old[S].p) : 0 } }
-      })
-    })
-    source.onerror = () => {}  // EventSource auto-reconnects
-    return () => source.close()
-  }, [])
-
-  const symbols = Object.keys(prices)
-  if (symbols.length === 0) return null
-  return (
-    <div className="ticker-strip" aria-label="Live simulated ticks">
-      <span className="tag">live·sse</span>
-      {symbols.map((s) => (
-        <span key={s}>
-          <span className="sym">{s} </span>
-          <span className={`px${prices[s].dir > 0 ? ' up' : prices[s].dir < 0 ? ' down' : ''}`}>
-            {formatPrice(prices[s].p)}
-          </span>
-        </span>
-      ))}
     </div>
   )
 }
@@ -193,8 +160,9 @@ function mount(id, node) {
   if (el) createRoot(el).render(<StrictMode>{node}</StrictMode>)
 }
 
+initRibbon()
+
 mount('island-hero', <HeroChart />)
-mount('island-ticker', <TickerStrip />)
 mount('island-gallery', <Gallery />)
 mount('island-proof', <DeterminismProof />)
 

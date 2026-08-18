@@ -1,4 +1,7 @@
+import { initRibbon } from './ribbon.js'
 import './theme.css'
+
+initRibbon()
 
 for (const btn of document.querySelectorAll('button.copy[data-copy-target]')) {
   btn.addEventListener('click', () => {

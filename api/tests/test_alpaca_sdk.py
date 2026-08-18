@@ -39,7 +39,7 @@ def base_url():
     while not server.started:
         assert time.time() < deadline, "test server failed to start"
         time.sleep(0.05)
-    yield f"http://127.0.0.1:{port}/api"
+    yield f"http://127.0.0.1:{port}/api/v1/alpaca"
     server.should_exit = True
     thread.join(timeout=5)
 

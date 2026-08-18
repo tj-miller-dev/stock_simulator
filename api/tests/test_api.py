@@ -19,20 +19,26 @@ def test_index_is_self_describing():
     r = client.get("/api")
     body = r.json()
     assert body["synthetic"] is True
+    assert body["api_version"] == 1
     assert body["generation"] == 1
-    assert any("/api/v2/stocks/bars" == e["path"] for e in body["endpoints"])
+    alpaca = body["providers"]["alpaca"]
+    assert alpaca["base_url"].endswith("/api/v1/alpaca")
+    assert any(
+        e["path"] == "/api/v1/alpaca/v2/stocks/bars" for e in alpaca["endpoints"]
+    )
+    assert any(e["path"] == "/api/v1/stream" for e in body["native_endpoints"])
     assert "CRASH" in body["magic_tickers"]
 
 
 def test_synthetic_headers_everywhere():
-    for path in ("/api", "/api/health", "/api/v2/stocks/bars?symbols=AAPL"):
+    for path in ("/api", "/api/health", "/api/v1/alpaca/v2/stocks/bars?symbols=AAPL"):
         r = client.get(path)
         assert r.headers["X-Cuckoo-Synthetic"] == "true"
         assert r.headers["X-Cuckoo-Generation"] == "1"
 
 
 def test_bars_shape_and_determinism():
-    url = "/api/v2/stocks/bars?symbols=AAPL,CRASH&start=2026-07-01&end=2026-07-15"
+    url = "/api/v1/alpaca/v2/stocks/bars?symbols=AAPL,CRASH&start=2026-07-01&end=2026-07-15"
     a, b = client.get(url), client.get(url)
     assert a.status_code == 200
     assert a.json() == b.json()
@@ -43,7 +49,7 @@ def test_bars_shape_and_determinism():
 
 
 def test_pagination_walk():
-    base = "/api/v2/stocks/bars?symbols=MSFT,SPY&timeframe=1Day&start=2026-06-01&end=2026-07-31&limit=15"
+    base = "/api/v1/alpaca/v2/stocks/bars?symbols=MSFT,SPY&timeframe=1Day&start=2026-06-01&end=2026-07-31&limit=15"
     all_bars = []
     token, pages = None, 0
     while True:
@@ -59,7 +65,7 @@ def test_pagination_walk():
     assert pages > 2
     assert len(all_bars) == len(set(all_bars))  # no duplicates across pages
     full = client.get(
-        "/api/v2/stocks/bars?symbols=MSFT,SPY&timeframe=1Day&start=2026-06-01&end=2026-07-31&limit=10000"
+        "/api/v1/alpaca/v2/stocks/bars?symbols=MSFT,SPY&timeframe=1Day&start=2026-06-01&end=2026-07-31&limit=10000"
     ).json()["bars"]
     expected = [(s, b["t"]) for s in sorted(full) for b in full[s]]
     assert all_bars == expected  # pagination loses and reorders nothing
@@ -67,55 +73,55 @@ def test_pagination_walk():
 
 def test_sort_desc():
     body = client.get(
-        "/api/v2/stocks/bars?symbols=AAPL&start=2026-07-01&end=2026-07-15&sort=desc"
+        "/api/v1/alpaca/v2/stocks/bars?symbols=AAPL&start=2026-07-01&end=2026-07-15&sort=desc"
     ).json()
     ts = [b["t"] for b in body["bars"]["AAPL"]]
     assert ts == sorted(ts, reverse=True)
 
 
 def test_single_symbol_route():
-    body = client.get("/api/v2/stocks/AAPL/bars?start=2026-07-01&end=2026-07-15").json()
+    body = client.get("/api/v1/alpaca/v2/stocks/AAPL/bars?start=2026-07-01&end=2026-07-15").json()
     assert body["symbol"] == "AAPL"
     assert isinstance(body["bars"], list) and body["bars"]
 
 
 def test_latest():
-    body = client.get("/api/v2/stocks/bars/latest?symbols=AAPL,FLAT").json()
+    body = client.get("/api/v1/alpaca/v2/stocks/bars/latest?symbols=AAPL,FLAT").json()
     assert set(body["bars"]) == {"AAPL", "FLAT"}
     assert body["bars"]["FLAT"]["o"] == 100.0
 
 
 def test_errors_teach():
-    r = client.get("/api/v2/stocks/bars?symbols=AAPL&timeframe=2Day")
+    r = client.get("/api/v1/alpaca/v2/stocks/bars?symbols=AAPL&timeframe=2Day")
     assert r.status_code == 400
     body = r.json()
     assert body["code"] == 40010001
     assert "1Day" in body["message"] and "example" in body["message"]
 
-    r = client.get("/api/v2/stocks/bars?symbols=" + ",".join(f"S{i}" for i in range(51)))
+    r = client.get("/api/v1/alpaca/v2/stocks/bars?symbols=" + ",".join(f"S{i}" for i in range(51)))
     assert r.status_code == 400 and "50" in r.json()["message"]
 
-    r = client.get("/api/v2/stocks/bars?symbols=AAPL&generation=99")
+    r = client.get("/api/v1/alpaca/v2/stocks/bars?symbols=AAPL&generation=99")
     assert r.status_code == 400 and "generation" in r.json()["message"]
 
-    r = client.get("/api/v2/stocks/bars?symbols=AAPL&limit=99999")
+    r = client.get("/api/v1/alpaca/v2/stocks/bars?symbols=AAPL&limit=99999")
     assert r.status_code == 400 and "10000" in r.json()["message"]
 
-    r = client.get("/api/v2/stocks/bars?symbols=AAPL&page_token=garbage")
+    r = client.get("/api/v1/alpaca/v2/stocks/bars?symbols=AAPL&page_token=garbage")
     assert r.status_code == 400 and "page_token" in r.json()["message"]
 
 
 def test_ignored_alpaca_params_accepted():
     r = client.get(
-        "/api/v2/stocks/bars?symbols=AAPL&adjustment=raw&feed=iex&asof=2026-07-01&currency=USD"
+        "/api/v1/alpaca/v2/stocks/bars?symbols=AAPL&adjustment=raw&feed=iex&asof=2026-07-01&currency=USD"
     )
     assert r.status_code == 200
 
 
 def test_immutable_cache_header_on_closed_history():
-    r = client.get("/api/v2/stocks/bars?symbols=AAPL&start=2026-06-01&end=2026-06-30")
+    r = client.get("/api/v1/alpaca/v2/stocks/bars?symbols=AAPL&start=2026-06-01&end=2026-06-30")
     assert r.headers["Cache-Control"] == "public, max-age=31536000, immutable"
-    r = client.get("/api/v2/stocks/bars?symbols=AAPL")  # open-ended window
+    r = client.get("/api/v1/alpaca/v2/stocks/bars?symbols=AAPL")  # open-ended window
     assert "immutable" not in r.headers.get("Cache-Control", "")
 
 
@@ -140,6 +146,12 @@ def test_rate_limit_and_headers():
 def test_removed_debug_endpoints_are_gone():
     for path in ("/api/hello", "/api/random", "/api/somethingspecial", "/api/randomlist"):
         assert client.get(path).status_code == 404
+
+
+def test_pre_versioning_paths_are_gone():
+    # Provider surfaces live at /api/v1/{provider}/...; the unversioned,
+    # provider-less spelling never shipped and must not resolve.
+    assert client.get("/api/v2/stocks/bars?symbols=AAPL").status_code == 404
 
 
 def test_sse_demo_events_generator():

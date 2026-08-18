@@ -3,6 +3,10 @@ export const API_BASE = import.meta.env.VITE_API_BASE ?? '/api'
 // Public host shown in copy-paste snippets, regardless of where the page runs.
 export const PUBLIC_BASE = 'https://cuckootrade.com/api'
 
+// Provider-mimicry surface: /api/v1/{provider}/<the provider's own path>.
+// Alpaca is the first provider; future ones mount alongside.
+export const ALPACA_PATH = '/v1/alpaca'
+
 export function isoDaysAgo(days) {
   const d = new Date(Date.now() - days * 86400e3)
   return d.toISOString().slice(0, 10)
@@ -10,7 +14,7 @@ export function isoDaysAgo(days) {
 
 export function barsUrl(params, base = API_BASE) {
   const q = new URLSearchParams(params)
-  return `${base}/v2/stocks/bars?${q.toString()}`
+  return `${base}${ALPACA_PATH}/v2/stocks/bars?${q.toString()}`
 }
 
 export async function fetchBars(params, opts = {}) {

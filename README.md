@@ -1,11 +1,12 @@
 # CuckooTrade
 
-**100% real fake market data.** A free, deterministic, Alpaca-compatible
-market data API with no key and no signup — for development, CI, demos, and
-teaching. Live at **[cuckootrade.com](https://cuckootrade.com)**.
+**Market data for everything before production.** A free, deterministic,
+Alpaca-compatible API serving openly synthetic data — no key, no signup — for
+development, CI, demos, and teaching. Live at
+**[cuckootrade.com](https://cuckootrade.com)**.
 
 ```bash
-curl 'https://cuckootrade.com/api/v2/stocks/bars?symbols=AAPL,CRASH&timeframe=1Day&start=2026-07-01'
+curl 'https://cuckootrade.com/api/v1/alpaca/v2/stocks/bars?symbols=AAPL,CRASH&timeframe=1Day&start=2026-07-01'
 ```
 
 That works right now, from anywhere, with no account. Using
@@ -13,10 +14,15 @@ That works right now, from anywhere, with no account. Using
 
 ```python
 client = StockHistoricalDataClient(
-    api_key="any", secret_key="any",              # never checked
-    url_override="https://cuckootrade.com/api",   # <- the whole integration
+    api_key="any", secret_key="any",                        # never checked
+    url_override="https://cuckootrade.com/api/v1/alpaca",   # <- the whole integration
 )
 ```
+
+Paths are provider-namespaced and versioned: `/api/v1/{provider}/…` mimics
+that provider's wire format (Alpaca first; more planned), while
+`/api/v1/stream` and friends are CuckooTrade-native. The path `v1` versions
+the API surface; the `generation` parameter versions the data.
 
 ## Why
 
@@ -38,10 +44,10 @@ test mode of market data:
   volatility regimes, volume that follows the action, and exact cross-timeframe
   coherence (minute bars aggregate to the daily bar, days to weeks).
 
-## Magic tickers
+## Scenario tickers
 
-Scripted, calendar-anchored scenarios no real data provider can sell you —
-each visible in any 30-day window:
+Reserved symbols with scripted, calendar-anchored behavior — each pattern
+visible in any 30-day window:
 
 | ticker | behavior |
 |---|---|

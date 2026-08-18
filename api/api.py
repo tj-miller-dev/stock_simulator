@@ -1,10 +1,19 @@
-"""CuckooTrade HTTP API: Alpaca-wire-compatible synthetic market data.
+"""CuckooTrade HTTP API: provider-wire-compatible synthetic market data.
+
+Path scheme: /api/v1/{provider}/<provider's own path>. Everything through the
+provider segment is CuckooTrade's namespace (the v1 versions this API's
+surface; the `generation` param versions the data). Everything after it
+mimics that provider's wire format, so its SDKs work with only a base-URL
+override. Alpaca is the first provider; future ones (an Alpha Vantage-shaped
+/api/v1/alphavantage/query, an IBKR surface, ...) mount alongside as their
+own routers without touching existing paths.
 
 The compatibility contract (V1_SPEC 3.1): alpaca-py's historical data client,
-pointed here via url_override, works unmodified. Wire-compat responses carry
-no extra body fields -- strict SDK parsers must never choke -- so the
-synthetic marking rides in X-Cuckoo-* headers instead. Cuckoo-native
-endpoints (/api, /api/v1/stream) carry full metadata in the body.
+pointed at /api/v1/alpaca via url_override, works unmodified. Wire-compat
+responses carry no extra body fields -- strict SDK parsers must never choke
+-- so the synthetic marking rides in X-Cuckoo-* headers instead.
+Cuckoo-native endpoints (/api, /api/v1/stream) carry full metadata in the
+body.
 
 Error messages teach: they state the valid grammar and include a working
 example, because errors are read at the exact moment someone (or some agent)
@@ -15,7 +24,7 @@ import base64
 import re
 from datetime import datetime, timedelta, timezone
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -37,7 +46,7 @@ BARS_DEFAULT_LOOKBACK = timedelta(days=30)
 BARS_MAX_SYMBOLS = 50
 _SYMBOL_RE = re.compile(r"^[A-Za-z][A-Za-z0-9.\-]{0,11}$")
 
-EXAMPLE = "/api/v2/stocks/bars?symbols=AAPL,CRASH&timeframe=1Day&start=2026-07-01"
+EXAMPLE = "/api/v1/alpaca/v2/stocks/bars?symbols=AAPL,CRASH&timeframe=1Day&start=2026-07-01"
 
 # The docs endpoints hang off the app, not off the /api-prefixed routes, so
 # they must be prefixed by hand or the ALB routes them to the frontend.
@@ -238,7 +247,13 @@ def paginate_bars(symbols, tf, start_dt, end_dt, limit, seed, page_token, descen
     return bars_by_symbol, next_token
 
 
-@app.get("/api/v2/stocks/bars")
+# ---- provider surface: Alpaca ----------------------------------------------
+# Paths under this router replicate data.alpaca.markets exactly; nothing
+# CuckooTrade-specific may leak into them beyond the seed/generation params.
+alpaca = APIRouter(prefix="/api/v1/alpaca", tags=["provider: alpaca"])
+
+
+@alpaca.get("/v2/stocks/bars")
 def stock_bars(
     symbols: str,
     timeframe: str = "1Day",
@@ -268,7 +283,7 @@ def stock_bars(
     return response
 
 
-@app.get("/api/v2/stocks/bars/latest")
+@alpaca.get("/v2/stocks/bars/latest")
 def stock_bars_latest(
     symbols: str,
     timeframe: str = "1Min",
@@ -284,7 +299,7 @@ def stock_bars_latest(
     }
 
 
-@app.get("/api/v2/stocks/{symbol}/bars")
+@alpaca.get("/v2/stocks/{symbol}/bars")
 def stock_bars_single(
     symbol: str,
     timeframe: str = "1Day",
@@ -335,9 +350,17 @@ def index():
     return {
         "name": "CuckooTrade",
         "synthetic": True,
+        "api_version": 1,
         "generation": GENERATION,
-        "tagline": "100% real fake market data. No key, no signup, deterministic.",
+        "tagline": "Deterministic synthetic market data. No key, no signup.",
         "disclaimer": DISCLAIMER,
+        "path_scheme": (
+            "/api/v1/{provider}/<provider's own path> mimics that provider's "
+            "wire format (point its SDK there via a base-URL override); "
+            "/api/v1/... without a provider segment is CuckooTrade-native. "
+            "The path version covers this API's surface; the `generation` "
+            "parameter versions the data itself."
+        ),
         "docs": {
             "site": DOCS_URL,
             "openapi": "/api/openapi.json",
@@ -346,7 +369,8 @@ def index():
         },
         "determinism": (
             "Identical requests return identical bars, forever, within a "
-            "generation. Add &seed=<anything> for an alternate universe."
+            "generation. Add &seed=<anything> for a different but equally "
+            "deterministic dataset."
         ),
         "magic_tickers": {
             "CRASH": "sharp ~25% crash mid-month, slow recovery",
@@ -358,26 +382,36 @@ def index():
             "PENNY": "sub-dollar prices, high volatility",
             "CHOPPY": "high volatility, zero net drift",
         },
-        "endpoints": [
-            {
-                "method": "GET",
-                "path": "/api/v2/stocks/bars",
-                "purpose": "Alpaca-compatible historical bars (point alpaca-py "
-                "here via url_override='https://cuckootrade.com/api')",
-                "example": EXAMPLE,
+        "providers": {
+            "alpaca": {
+                "status": "available",
+                "base_url": "https://cuckootrade.com/api/v1/alpaca",
+                "compatible_with": "https://data.alpaca.markets",
+                "sdk_hint": "StockHistoricalDataClient(url_override="
+                "'https://cuckootrade.com/api/v1/alpaca') with any non-empty keys",
+                "endpoints": [
+                    {
+                        "method": "GET",
+                        "path": "/api/v1/alpaca/v2/stocks/bars",
+                        "purpose": "Alpaca-compatible historical bars",
+                        "example": EXAMPLE,
+                    },
+                    {
+                        "method": "GET",
+                        "path": "/api/v1/alpaca/v2/stocks/bars/latest",
+                        "purpose": "latest completed bar per symbol",
+                        "example": "/api/v1/alpaca/v2/stocks/bars/latest?symbols=AAPL,SPY",
+                    },
+                    {
+                        "method": "GET",
+                        "path": "/api/v1/alpaca/v2/stocks/{symbol}/bars",
+                        "purpose": "single-symbol variant",
+                        "example": "/api/v1/alpaca/v2/stocks/AAPL/bars?timeframe=15Min",
+                    },
+                ],
             },
-            {
-                "method": "GET",
-                "path": "/api/v2/stocks/bars/latest",
-                "purpose": "latest completed bar per symbol",
-                "example": "/api/v2/stocks/bars/latest?symbols=AAPL,SPY",
-            },
-            {
-                "method": "GET",
-                "path": "/api/v2/stocks/{symbol}/bars",
-                "purpose": "single-symbol variant",
-                "example": "/api/v2/stocks/AAPL/bars?timeframe=15Min",
-            },
+        },
+        "native_endpoints": [
             {
                 "method": "GET",
                 "path": "/api/v1/stream",
@@ -390,6 +424,7 @@ def index():
     }
 
 
+app.include_router(alpaca)
 app.include_router(stream_router)
 
 

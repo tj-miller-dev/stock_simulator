@@ -34,11 +34,13 @@
           <a class="btn btn-primary btn-sm" href="#quickstart">Get started</a>
         </nav>
       </div>
+      <div id="ticker-ribbon" class="ribbon" aria-label="Live synthetic prices"></div>
     </header>
 
     <div class="shell">
       <nav class="toc" aria-label="Contents">
         <a href="#quickstart">quickstart</a>
+        <a href="#structure">structure</a>
         <a href="#bars">bars</a>
         <a href="#determinism">determinism</a>
         <a href="#magic">scenario tickers</a>
@@ -53,20 +55,51 @@
         <p>No key, no signup. This works right now, from anywhere:</p>
         <div class="panel" style="position:relative">
           <button type="button" class="copy" style="position:absolute;top:10px;right:10px" data-copy-target="#qs">copy</button>
-          <pre class="doc-pre" id="qs">curl 'https://cuckootrade.com/api/v2/stocks/bars?symbols=AAPL,CRASH&amp;timeframe=1Day&amp;start=2026-07-01'</pre>
+          <pre class="doc-pre" id="qs">curl 'https://cuckootrade.com/api/v1/alpaca/v2/stocks/bars?symbols=AAPL,CRASH&amp;timeframe=1Day&amp;start=2026-07-01'</pre>
         </div>
         <p>
           Using <a href="https://github.com/alpacahq/alpaca-py">alpaca-py</a>? Pass
-          <code>url_override="https://cuckootrade.com/api"</code> and any non-empty
-          strings as API keys — they're never checked. The API is also
+          <code>url_override="https://cuckootrade.com/api/v1/alpaca"</code> and any
+          non-empty strings as API keys — they're never checked. The API is also
           self-describing: <a href="/api">/api</a> returns a machine-readable index,
           and <a href="/llms.txt">/llms.txt</a> summarizes everything for AI coding
           tools.
         </p>
       </section>
 
+      <section id="structure">
+        <h2>API structure &amp; versioning</h2>
+        <p>
+          Every endpoint lives under <code>/api/v1/</code>, and provider-compatible
+          surfaces add the provider's name to the path:
+        </p>
+        <div class="panel">
+          <pre class="doc-pre">/api/v1/{provider}/&lt;the provider's own path&gt;   ← mimics that provider's wire format
+/api/v1/&lt;endpoint&gt;                            ← CuckooTrade-native (e.g. /api/v1/stream)</pre>
+        </div>
+        <p>
+          Everything through the provider segment is CuckooTrade's namespace;
+          everything after it replicates the provider exactly, which is why an
+          SDK only needs its base URL changed. Alpaca is the first provider —
+          <code>https://cuckootrade.com/api/v1/alpaca</code> stands in for
+          <code>https://data.alpaca.markets</code>, so the <code>v2</code> in
+          <code>/api/v1/alpaca/v2/stocks/bars</code> is Alpaca's own version, not
+          ours. Additional provider surfaces will mount alongside under their own
+          names without changing anything that exists.
+        </p>
+        <p>
+          Two things are versioned, on purpose: the <b>path version</b>
+          (<code>v1</code>) covers the API surface — paths, parameters, error
+          shapes — while the <b><code>generation</code> parameter</b> covers the
+          data itself. A surface change bumps the path; a data change becomes a new
+          generation, and old generations stay queryable (see
+          <a href="#determinism">determinism</a>).
+        </p>
+      </section>
+
       <section id="bars">
-        <h2 class="mono">GET /api/v2/stocks/bars</h2>
+        <span class="eyebrow">Provider surface · Alpaca</span>
+        <h2 class="mono">GET /api/v1/alpaca/v2/stocks/bars</h2>
         <p>
           Alpaca-compatible historical OHLCV bars. Regular sessions only
           (09:30–16:00 ET, NYSE calendar — weekends and US market holidays have no
@@ -85,10 +118,12 @@
           <tr><td>adjustment, feed, asof, currency</td><td>accepted and ignored, for Alpaca client compatibility. No corporate actions exist in generation 1.</td></tr>
         </table>
         <p>
-          Also available: <code>/api/v2/stocks/{symbol}/bars</code> (single symbol)
-          and <code>/api/v2/stocks/bars/latest?symbols=…</code> (last completed bar).
-          Errors are Alpaca-shaped <code>{"code", "message"}</code>, and every
-          message states the valid grammar plus a working example.
+          Also available: <code>/api/v1/alpaca/v2/stocks/{symbol}/bars</code>
+          (single symbol) and
+          <code>/api/v1/alpaca/v2/stocks/bars/latest?symbols=…</code> (last
+          completed bar). Errors are Alpaca-shaped
+          <code>{"code", "message"}</code>, and every message states the valid
+          grammar plus a working example.
         </p>
       </section>
 
@@ -127,9 +162,11 @@
       </section>
 
       <section id="stream">
+        <span class="eyebrow">CuckooTrade native</span>
         <h2 class="mono">GET /api/v1/stream (SSE)</h2>
         <p>
-          Server-sent events — curl-able, no WebSocket library needed. Two clocks:
+          Server-sent events — curl-able, no WebSocket library needed. It's what
+          drives the live ticker at the top of every page here. Two clocks:
           <code>clock=demo</code> (default) is an always-open synthetic session whose
           price is a pure function of wall time, so every viewer sees the same tick
           at the same instant; <code>clock=real</code> follows the NYSE calendar and

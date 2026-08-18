@@ -46,6 +46,7 @@
           <a class="btn btn-primary btn-sm" href="/docs#quickstart">Get started</a>
         </nav>
       </div>
+      <div id="ticker-ribbon" class="ribbon" aria-label="Live synthetic prices"></div>
     </header>
 
     <div class="shell">
@@ -74,10 +75,9 @@
             <!-- static fallback: replaced by the live chart island -->
             <div class="panel">
               <div class="panel-title"><span class="dot"></span><span>CUCKOO · 1Day · synthetic</span></div>
-              <pre class="curl-line"><span class="prompt">$</span> curl 'https://cuckootrade.com/api/v2/stocks/bars?symbols=CUCKOO&amp;timeframe=1Day'</pre>
+              <pre class="curl-line"><span class="prompt">$</span> curl 'https://cuckootrade.com/api/v1/alpaca/v2/stocks/bars?symbols=CUCKOO&amp;timeframe=1Day'</pre>
             </div>
           </div>
-          <div id="island-ticker"></div>
         </div>
       </section>
 
@@ -99,6 +99,11 @@
             unmodified — override one base URL to develop against CuckooTrade, then
             point it back when you're ready for live data.
           </p>
+          <p>
+            The provider lives in the path — <code>/api/v1/alpaca/…</code> — so
+            support for additional providers can mount alongside without breaking
+            anything you've built.
+          </p>
           <p><a class="more-link" href="/docs#bars">See the full endpoint reference →</a></p>
         </div>
         <div>
@@ -107,7 +112,7 @@
             <pre class="diff">  client = StockHistoricalDataClient(
       api_key, secret_key,
 <span class="del">-     url_override="https://data.alpaca.markets",</span>
-<span class="add">+     url_override="https://cuckootrade.com/api",</span>
+<span class="add">+     url_override="https://cuckootrade.com/api/v1/alpaca",</span>
   )</pre>
           </div>
         </div>
@@ -213,7 +218,9 @@
           <p>
             Plain HTTP with permissive CORS — no client library required. Use the
             official Alpaca SDKs, fetch from the browser, script it with curl, or
-            subscribe to the live SSE stream.
+            subscribe to the live SSE stream — the ticker running at the top of
+            this page is that stream, and <code>curl -N</code> gets you the exact
+            same feed.
           </p>
           <p>
             AI coding tools are covered too: a machine-readable index at
@@ -231,7 +238,7 @@
             </div>
             <div class="tabpanes">
               <button type="button" class="copy" data-copy-target=".tabpanes pre.active">copy</button>
-              <pre data-pane-id="curl" class="active" id="snippet-curl">curl 'https://cuckootrade.com/api/v2/stocks/bars?symbols=AAPL,CRASH&amp;timeframe=1Day&amp;start=2026-07-01'</pre>
+              <pre data-pane-id="curl" class="active" id="snippet-curl">curl 'https://cuckootrade.com/api/v1/alpaca/v2/stocks/bars?symbols=AAPL,CRASH&amp;timeframe=1Day&amp;start=2026-07-01'</pre>
               <pre data-pane-id="python">from datetime import datetime
 
 from alpaca.data.historical import StockHistoricalDataClient
@@ -240,7 +247,7 @@ from alpaca.data.timeframe import TimeFrame
 
 client = StockHistoricalDataClient(
     api_key="any", secret_key="any",  # never checked
-    url_override="https://cuckootrade.com/api",
+    url_override="https://cuckootrade.com/api/v1/alpaca",
 )
 bars = client.get_stock_bars(StockBarsRequest(
     symbol_or_symbols=["AAPL", "CRASH"],
@@ -249,7 +256,7 @@ bars = client.get_stock_bars(StockBarsRequest(
 ))
 print(bars["CRASH"][0])</pre>
               <pre data-pane-id="js">const res = await fetch(
-  'https://cuckootrade.com/api/v2/stocks/bars' +
+  'https://cuckootrade.com/api/v1/alpaca/v2/stocks/bars' +
   '?symbols=AAPL,CRASH&amp;timeframe=1Day&amp;start=2026-07-01'
 )
 const { bars } = await res.json()
@@ -293,7 +300,7 @@ cache-control: public, max-age=31536000, immutable</pre>
       <div class="cta-band">
         <h2>Make your first request</h2>
         <p>No key, no signup, no setup — this command works right now.</p>
-        <pre class="curl-line"><span class="prompt">$</span> <span id="cta-curl">curl 'https://cuckootrade.com/api/v2/stocks/bars?symbols=AAPL,CRASH&amp;timeframe=1Day'</span> <button type="button" class="copy" data-copy-target="#cta-curl">copy</button></pre>
+        <pre class="curl-line"><span class="prompt">$</span> <span id="cta-curl">curl 'https://cuckootrade.com/api/v1/alpaca/v2/stocks/bars?symbols=AAPL,CRASH&amp;timeframe=1Day'</span> <button type="button" class="copy" data-copy-target="#cta-curl">copy</button></pre>
         <div class="hero-ctas">
           <a class="btn btn-primary" href="/playground">Open the playground</a>
           <a class="btn btn-ghost" href="/docs">Read the docs</a>

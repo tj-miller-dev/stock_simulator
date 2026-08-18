@@ -33,7 +33,7 @@
 
 * { box-sizing: border-box; }
 
-html { scroll-behavior: smooth; scroll-padding-top: 76px; }
+html { scroll-behavior: smooth; scroll-padding-top: 112px; }
 
 body {
   margin: 0;
@@ -215,16 +215,48 @@ button.copy {
 button.copy:hover { color: var(--accent); border-color: var(--accent-dim); }
 button.copy.done { color: var(--good); border-color: var(--good); }
 
-/* ---- live ticker strip ---- */
-.ticker-strip {
-  display: flex; flex-wrap: wrap; gap: 10px 26px;
-  padding: 12px 2px 0; font-family: var(--mono); font-size: 0.85rem;
+/* ---- live ticker ribbon (bottom edge of the sticky masthead) ---- */
+.ribbon {
+  display: flex; align-items: center;
+  height: 34px; overflow: hidden;
+  border-top: 1px solid var(--border);
+  background: var(--bg-inset);
+  font-family: var(--mono); font-size: 0.78rem;
 }
-.ticker-strip .sym { color: var(--ink-3); }
-.ticker-strip .px { color: var(--ink); transition: color 0.5s; }
-.ticker-strip .px.up { color: var(--good); }
-.ticker-strip .px.down { color: var(--critical); }
-.ticker-strip .tag { color: var(--accent); }
+.ribbon:empty { display: none; }
+.ribbon-badge {
+  display: flex; align-items: center; gap: 7px; flex: none;
+  height: 100%; padding: 0 16px 0 24px;
+  border-right: 1px solid var(--border);
+  color: var(--accent); font-size: 0.7rem;
+  text-transform: uppercase; letter-spacing: 0.08em;
+}
+.ribbon-badge:hover { text-decoration: none; color: #ffc23d; }
+.ribbon-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--good);
+  animation: ribbon-pulse 1.6s ease-in-out infinite;
+}
+.ribbon-window { flex: 1; overflow: hidden; }
+.ribbon-track {
+  display: flex; width: max-content;
+  animation: ribbon-scroll 60s linear infinite;
+}
+.ribbon-window:hover .ribbon-track { animation-play-state: paused; }
+.ribbon-group { display: flex; }
+.ribbon-item { padding: 0 16px; white-space: nowrap; }
+.ribbon-item .sym { color: var(--ink-3); }
+.ribbon-item .px { color: var(--ink); transition: color 0.4s; }
+.ribbon-item .px.up { color: var(--good); }
+.ribbon-item .px.down { color: var(--critical); }
+.ribbon-item .px.up::after { content: " ▲"; font-size: 0.8em; }
+.ribbon-item .px.down::after { content: " ▼"; font-size: 0.8em; }
+@keyframes ribbon-scroll { to { transform: translateX(-50%); } }
+@keyframes ribbon-pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) {
+  .ribbon-track { animation: none; }
+  .ribbon-dot { animation: none; }
+}
 
 /* ---- feature cards ---- */
 .props { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; }

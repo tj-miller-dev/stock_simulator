@@ -101,10 +101,19 @@ param applying these shapes to arbitrary symbols is a **named V1.1 candidate**, 
 
 ## 3. API surface
 
-### 3.1 `GET /api/v2/stocks/bars` — finish Alpaca compatibility
+Path scheme (added Aug 2026, supersedes the unversioned paths below where they
+appear elsewhere): **`/api/v1/{provider}/<the provider's own path>`** for
+provider-mimicry surfaces, `/api/v1/...` for Cuckoo-native endpoints. The path `v1`
+versions CuckooTrade's API surface; `generation` versions the data. Alpaca is the
+first provider (`/api/v1/alpaca/v2/stocks/bars` — the `v2` is Alpaca's own); future
+providers with different wire formats (IBKR, Alpha Vantage, …) mount alongside as
+their own routers. `/api` (index) and `/api/health` (probes) stay unversioned.
+
+### 3.1 `GET /api/v1/alpaca/v2/stocks/bars` — finish Alpaca compatibility
 
 The acceptance test (§9) is the definition of done: **`alpaca-py`'s historical data
-client, pointed at cuckootrade.com via `url_override`, works unmodified.**
+client, pointed at cuckootrade.com/api/v1/alpaca via `url_override`, works
+unmodified.**
 
 Params: `symbols` (required, comma list, cap 50), `timeframe` (Alpaca grammar:
 `[N]Min|Hour|Day|Week|Month`, calendar-aligned buckets), `start`, `end` (new),
@@ -125,8 +134,9 @@ body fields, so on wire-compat endpoints the marking rides in **headers**:
 Verify alpaca-py's tolerance before putting anything extra in the body. Cuckoo-native
 endpoints carry full metadata in the body.
 
-Should-have if cheap: `GET /api/v2/stocks/{symbol}/bars` (single-symbol variant) and
-`GET /api/v2/stocks/bars/latest` (last completed bar per the calendar).
+Should-have if cheap: `GET /api/v1/alpaca/v2/stocks/{symbol}/bars` (single-symbol
+variant) and `GET /api/v1/alpaca/v2/stocks/bars/latest` (last completed bar per the
+calendar).
 
 ### 3.2 `GET /api/v1/stream` — SSE (Cuckoo-native)
 

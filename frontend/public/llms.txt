@@ -4,27 +4,32 @@
 > signup. All data is synthetic — for development, CI, demos, and teaching,
 > never for real trading decisions or strategy validation.
 
-Base URL: https://cuckootrade.com/api
+Path scheme: /api/v1/{provider}/<provider's own path> mimics that provider's
+wire format; /api/v1/... without a provider segment is CuckooTrade-native.
+Alpaca is the first provider. Base URL for Alpaca-compatible clients:
+https://cuckootrade.com/api/v1/alpaca
 
 ## Why use it
 - No auth: the first request works from curl, CI, or a coding agent.
 - Deterministic: identical requests return identical bars, forever
-  (generation-versioned). Optional &seed=<any-string> selects an alternate
-  universe. Only completed bars are served, so responses are reproducible.
+  (generation-versioned). Optional &seed=<any-string> selects a different but
+  equally deterministic dataset. Only completed bars are served, so responses
+  are reproducible.
 - Alpaca wire-compatible: alpaca-py works unmodified with
-  url_override="https://cuckootrade.com/api" (API keys: any non-empty strings).
+  url_override="https://cuckootrade.com/api/v1/alpaca" (API keys: any
+  non-empty strings).
 - Magic tickers with scripted behavior for testing edge cases.
 
 ## Endpoints
 - GET /api — machine-readable index (start here)
-- GET /api/v2/stocks/bars?symbols=AAPL,CRASH&timeframe=1Day&start=2026-07-01
+- GET /api/v1/alpaca/v2/stocks/bars?symbols=AAPL,CRASH&timeframe=1Day&start=2026-07-01
   Alpaca-shaped bars: {"bars": {SYM: [{t,o,h,l,c,v,n,vw}]}, "next_page_token"}.
   Params: symbols (required, ≤50), timeframe ([1-59]Min, [1-23]Hour, 1Day,
   1Week, [1,2,3,4,6,12]Month), start, end, limit (total bars across symbols,
   ≤10000, then next_page_token → page_token), sort (asc|desc), seed,
   generation. adjustment/feed/asof/currency accepted and ignored.
-- GET /api/v2/stocks/{symbol}/bars — single-symbol variant
-- GET /api/v2/stocks/bars/latest?symbols=AAPL,SPY — last completed bar each
+- GET /api/v1/alpaca/v2/stocks/{symbol}/bars — single-symbol variant
+- GET /api/v1/alpaca/v2/stocks/bars/latest?symbols=AAPL,SPY — last completed bar each
 - GET /api/v1/stream?symbols=CUCKOO — SSE ticks. clock=demo (default) is an
   always-open synthetic session; clock=real follows the NYSE calendar.
   curl -N works. ≤10 symbols, ≤5 streams/address, 15-min max per connection.
