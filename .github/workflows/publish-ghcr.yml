@@ -1,0 +1,46 @@
+name: publish api image to GHCR
+
+# Serious CI users shouldn't depend on someone else's hobby cluster:
+# self-hosting is a feature. This publishes the API image publicly so
+# `docker run ghcr.io/tj-miller-dev/cuckootrade` just works. Determinism means
+# a self-hosted instance serves byte-identical data to cuckootrade.com for the
+# same generation.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'api/**'
+      - '.github/workflows/publish-ghcr.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: ./api
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/cuckootrade:latest
+            ghcr.io/${{ github.repository_owner }}/cuckootrade:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+          sbom: false

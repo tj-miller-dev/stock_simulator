@@ -3,8 +3,8 @@
 > **Read this first.** This document exists so that anyone — human or AI — arriving with
 > zero context can understand what this project is, why it looks the way it does, and
 > what decisions have already been made. The active build plan is in
-> [V1_SPEC.md](V1_SPEC.md). The infrastructure runbook is in the repo
-> [README](../README.md).
+> [V1_SPEC.md](V1_SPEC.md); the infrastructure runbook is
+> [QUICK_START.md](QUICK_START.md).
 
 ## What this is
 
@@ -75,16 +75,18 @@ The combination — no single leg is unique, the set is:
 
 - **Infrastructure: complete.** EKS cluster, ArgoCD GitOps, Terraform modules, GitHub
   Actions CI with OIDC (no stored keys), ALB ingress with ACM TLS, hardened (pinned
-  action SHAs, CIDR-restricted control plane). See the [README](../README.md) runbook.
-- **API: a seed, not a product yet.** `api/api.py` has one real endpoint — an
-  Alpaca-shaped `GET /api/v2/stocks/bars` returning seeded random-walk OHLCV — plus
-  leftover debug endpoints (`/hello`, `/random`, `/somethingspecial`) slated for
-  removal. The generator is naive (no calendar, no volatility structure).
-- **Frontend: a debug tool.** `frontend/main.jsx` is an "API Tester" page. Its one
-  real asset is `StockChart.jsx`, a solid hand-rolled SVG chart (hover, keyboard nav,
-  CSV export) that will be repurposed for the landing page hero.
-- **Repo: public** (github.com/tj-miller-dev/stock_simulator), history verified clean
-  of secrets, but missing LICENSE, description, and topics.
+  action SHAs, CIDR-restricted control plane). See the
+  [infrastructure runbook](QUICK_START.md).
+- **V1 is built** (branch `first_features`, Aug 2026). `api/engine/` is the
+  deterministic hierarchical generator (calendar, personalities, magic tickers,
+  golden-file byte-stability tests); `api/api.py` is the Alpaca-compatible surface
+  with pagination, teaching errors, keyless rate limiting, and synthetic-marking
+  headers; `api/stream.py` is the SSE stream; the frontend is a three-page MPA
+  (landing with islands, /playground, /docs) in the terminal-dark theme. The
+  acceptance test suite (`api/tests/`) includes alpaca-py pointed at the server via
+  `url_override`.
+- **Repo: public** (github.com/tj-miller-dev/stock_simulator), MIT licensed, history
+  verified clean of secrets. The API image also publishes to GHCR for self-hosters.
 
 ## Decision log (settled — don't relitigate without new information)
 
@@ -113,9 +115,9 @@ The combination — no single leg is unique, the set is:
 - Repo layout: `api/` (FastAPI), `frontend/` (React/Vite + nginx), `k8s/` (manifests
   ArgoCD syncs), `terraform/` (all infra), `argocd/` (one-time bootstrap app),
   `.github/workflows/` (build-and-deploy). Full operational detail, including the
-  teardown-order trap with ArgoCD self-heal, is in the [README](../README.md).
+  teardown-order trap with ArgoCD self-heal, is in the [infrastructure runbook](QUICK_START.md).
 
 ## Where to go next
 
 - Building or reviewing product work → [V1_SPEC.md](V1_SPEC.md)
-- Operating, rebuilding, or tearing down infrastructure → [README](../README.md)
+- Operating, rebuilding, or tearing down infrastructure → [infrastructure runbook](QUICK_START.md)

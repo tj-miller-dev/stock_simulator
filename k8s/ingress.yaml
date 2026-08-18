@@ -9,6 +9,11 @@ metadata:
     alb.ingress.kubernetes.io/target-type: ip
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
     alb.ingress.kubernetes.io/ssl-redirect: "443"
+    # SSE streams heartbeat every 15s; the ALB default idle timeout of 60s
+    # would still kill a stalled stream mid-halt, so give it headroom. This is
+    # an ALB-level attribute -- declared once here, it applies to the whole
+    # shared "stock-simulator" ALB group.
+    alb.ingress.kubernetes.io/load-balancer-attributes: idle_timeout.timeout_seconds=120
     # No certificate-arn annotation -- the controller auto-discovers the ACM
     # cert by matching this rule's `host` against ISSUED certs in the account,
     # so a fresh cert ARN after every destroy/apply still just works.
