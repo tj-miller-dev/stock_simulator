@@ -1,0 +1,67 @@
+# CuckooTrade — everything here is public, synthetic, and meant to be crawled.
+#
+# Being read by AI crawlers is the point, not a leak: coding agents that can
+# quote a keyless base URL are a primary audience (see docs/OVERVIEW.md). So
+# the AI crawlers are named and allowed explicitly rather than left to the
+# default, to document the intent and to survive a careless future edit.
+
+User-agent: *
+Allow: /
+
+# Search + answer engines
+User-agent: Googlebot
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: Bingbot
+Allow: /
+
+User-agent: DuckDuckBot
+Allow: /
+
+# AI training and retrieval crawlers
+User-agent: GPTBot
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Claude-Web
+Allow: /
+
+User-agent: anthropic-ai
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Perplexity-User
+Allow: /
+
+User-agent: Applebot
+Allow: /
+
+User-agent: Applebot-Extended
+Allow: /
+
+User-agent: CCBot
+Allow: /
+
+User-agent: Amazonbot
+Allow: /
+
+User-agent: meta-externalagent
+Allow: /
+
+User-agent: cohere-ai
+Allow: /
+
+Sitemap: https://cuckootrade.com/sitemap.xml
