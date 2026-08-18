@@ -3,10 +3,207 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>API Tester</title>
+    <title>CuckooTrade — 100% real fake market data</title>
+    <meta name="description" content="A free, deterministic, Alpaca-compatible fake market data API. No key, no signup. Point your client at cuckootrade.com for development, CI, demos, and tutorials — then switch back with one line." />
+    <link rel="canonical" href="https://cuckootrade.com/" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta property="og:title" content="CuckooTrade — 100% real fake market data" />
+    <meta property="og:description" content="Deterministic, Alpaca-compatible synthetic market data over HTTP. No key, no signup. Magic tickers like $CRASH give you a flash crash on demand." />
+    <meta property="og:url" content="https://cuckootrade.com/" />
+    <meta property="og:type" content="website" />
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebAPI",
+      "name": "CuckooTrade",
+      "description": "Free, deterministic, Alpaca-compatible fake market data API for developers: local development, CI pipelines, demos, and tutorials. No API key required. All data is synthetic.",
+      "url": "https://cuckootrade.com/",
+      "documentation": "https://cuckootrade.com/docs",
+      "termsOfService": "https://cuckootrade.com/docs#disclaimer",
+      "provider": { "@type": "Person", "name": "tj-miller-dev" }
+    }
+    </script>
   </head>
   <body>
-    <div id="root"></div>
-    <script type="module" src="main.jsx"></script>
+    <div class="shell">
+      <header class="masthead">
+        <span class="wordmark" aria-label="CuckooTrade">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <!-- minimal line-drawn cuckoo -->
+            <path d="M4 16c2-6 7-9 12-8l4-2-2 4c1 5-2 9-8 9l-4 3 1-4c-2-1-3-1-3-2z"
+              stroke="var(--accent)" stroke-width="1.5" stroke-linejoin="round"/>
+            <circle cx="14.5" cy="9.5" r="0.9" fill="var(--accent)"/>
+          </svg>
+          CUCKOO<b>TRADE</b>
+        </span>
+        <nav>
+          <a href="/playground">playground</a>
+          <a href="/docs">docs</a>
+          <a href="/api/docs">openapi</a>
+          <a href="https://github.com/tj-miller-dev/stock_simulator">github</a>
+        </nav>
+      </header>
+
+      <section class="hero">
+        <h1>100% real <span class="fake">fake</span> market data.</h1>
+        <p class="sub">
+          A free, deterministic, Alpaca-compatible market data API with no key, no
+          signup, and no real dollars anywhere near it. Build your trading app, test
+          your bot in CI, run a demo at 11pm on a Sunday — then switch to real data
+          by changing one line.
+        </p>
+
+        <div id="island-hero">
+          <!-- static fallback: replaced by the live chart island -->
+          <div class="panel">
+            <div class="panel-title"><span class="dot"></span><span>CUCKOO · 1Day · synthetic</span></div>
+            <pre class="curl-line"><span class="prompt">$</span> curl 'https://cuckootrade.com/api/v2/stocks/bars?symbols=CUCKOO&amp;timeframe=1Day'</pre>
+          </div>
+        </div>
+        <div id="island-ticker"></div>
+      </section>
+
+      <section id="one-line">
+        <h2>change one line</h2>
+        <p>
+          The bars endpoint speaks Alpaca's wire format —
+          <a href="https://github.com/alpacahq/alpaca-py">alpaca-py</a> works
+          unmodified. Develop and test against free fake data, flip the base URL to
+          go live.
+        </p>
+        <div class="panel">
+          <pre class="diff">  client = StockHistoricalDataClient(
+      api_key, secret_key,
+<span class="del">-     url_override="https://data.alpaca.markets",</span>
+<span class="add">+     url_override="https://cuckootrade.com/api",</span>
+  )</pre>
+        </div>
+      </section>
+
+      <section id="why">
+        <h2>why it exists</h2>
+        <div class="props">
+          <div class="prop">
+            <h3>no key, no signup</h3>
+            <p>Your first request works from curl, from CI, from a coding agent —
+            no account, no secrets, no rate-limit anxiety. 60 requests/minute per
+            address, free.</p>
+          </div>
+          <div class="prop">
+            <h3>deterministic</h3>
+            <p>Identical requests return identical bars, forever. Seed your tests
+            with reproducible fixtures; add <code>&amp;seed=anything</code> for an
+            alternate universe.</p>
+          </div>
+          <div class="prop">
+            <h3>alpaca-compatible</h3>
+            <p>Same paths, same params, same JSON shape as
+            <code>data.alpaca.markets</code>. Real SDKs parse it without a single
+            change. Markets closed? The simulation never is.</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="magic">
+        <h2>magic tickers</h2>
+        <p>
+          Reserved symbols with scripted behavior — a flash crash on demand, in your
+          staging environment, today. No real data provider can sell you that at any
+          price. Click one to open it in the playground.
+        </p>
+        <div id="island-gallery">
+          <!-- static fallback for crawlers; the island adds live sparklines -->
+          <ul>
+            <li><b>$CRASH</b> — sharp ~25% crash mid-month, slow recovery, every month.</li>
+            <li><b>$MOON</b> — parabolic pump peaking late in the month, hard correction.</li>
+            <li><b>$FLAT</b> — zero-range bars at exactly $100.00.</li>
+            <li><b>$GAPPY</b> — 5–15% overnight gaps most days.</li>
+            <li><b>$HALTS</b> — minute bars missing during intraday halt windows.</li>
+            <li><b>$SPIKEY</b> — single-minute fat-finger wicks.</li>
+            <li><b>$PENNY</b> — sub-dollar prices with four decimals.</li>
+            <li><b>$CHOPPY</b> — high volatility, zero net drift.</li>
+          </ul>
+        </div>
+      </section>
+
+      <section id="determinism">
+        <h2>proof: same request, same bytes</h2>
+        <p>
+          Every bar is a pure function of (symbol, timestamp, seed). Below, the same
+          request is fetched twice, live — compare the SHA-256 of the two response
+          bodies. Yesterday's data never shifts under you, and neither will next
+          month's re-run of your test suite.
+        </p>
+        <div id="island-proof"></div>
+      </section>
+
+      <section id="snippets">
+        <h2>use it from anywhere</h2>
+        <div class="panel">
+          <div class="tabs" role="tablist">
+            <button type="button" data-pane="curl" class="active">curl</button>
+            <button type="button" data-pane="python">python</button>
+            <button type="button" data-pane="js">javascript</button>
+            <button type="button" data-pane="stream">stream</button>
+          </div>
+          <div class="tabpanes">
+            <button type="button" class="copy" data-copy-target=".tabpanes pre.active">copy</button>
+            <pre data-pane-id="curl" class="active" id="snippet-curl">curl 'https://cuckootrade.com/api/v2/stocks/bars?symbols=AAPL,CRASH&amp;timeframe=1Day&amp;start=2026-07-01'</pre>
+            <pre data-pane-id="python">from datetime import datetime
+
+from alpaca.data.historical import StockHistoricalDataClient
+from alpaca.data.requests import StockBarsRequest
+from alpaca.data.timeframe import TimeFrame
+
+client = StockHistoricalDataClient(
+    api_key="any", secret_key="any",  # never checked
+    url_override="https://cuckootrade.com/api",
+)
+bars = client.get_stock_bars(StockBarsRequest(
+    symbol_or_symbols=["AAPL", "CRASH"],
+    timeframe=TimeFrame.Day,
+    start=datetime(2026, 7, 1),
+))
+print(bars["CRASH"][0])</pre>
+            <pre data-pane-id="js">const res = await fetch(
+  'https://cuckootrade.com/api/v2/stocks/bars' +
+  '?symbols=AAPL,CRASH&amp;timeframe=1Day&amp;start=2026-07-01'
+)
+const { bars } = await res.json()
+console.log(bars.CRASH[0])</pre>
+            <pre data-pane-id="stream"># server-sent events: an always-open synthetic session
+curl -N 'https://cuckootrade.com/api/v1/stream?symbols=CUCKOO,CRASH'</pre>
+          </div>
+        </div>
+      </section>
+
+      <section id="honesty">
+        <div class="disclaimer">
+          <b>every bar on this site is fiction.</b> CuckooTrade is for exercising
+          code paths — development, CI, demos, teaching. It is not market data, not
+          financial advice, and absolutely not a backtesting oracle: a profitable
+          strategy on synthetic data means nothing. That honesty is the product.
+        </div>
+      </section>
+
+      <footer>
+        <div class="cols">
+          <a href="/docs">docs</a>
+          <a href="/playground">playground</a>
+          <a href="/api">api index</a>
+          <a href="/api/docs">swagger</a>
+          <a href="/api/openapi.json">openapi.json</a>
+          <a href="/llms.txt">llms.txt</a>
+          <a href="https://github.com/tj-miller-dev/stock_simulator">github</a>
+        </div>
+        <p>
+          Runs on EKS with ArgoCD GitOps, Terraform-managed, deployed on every push —
+          the entire pipeline is
+          <a href="https://github.com/tj-miller-dev/stock_simulator">public</a>.
+          Synthetic data, generation 1, served with a straight face.
+        </p>
+      </footer>
+    </div>
+    <script type="module" src="/src/landing.jsx"></script>
   </body>
 </html>

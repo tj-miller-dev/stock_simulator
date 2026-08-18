@@ -1,0 +1,222 @@
+import { StrictMode, useEffect, useRef, useState } from 'react'
+import { createRoot } from 'react-dom/client'
+import LineChart from './chart/LineChart.jsx'
+import Sparkline from './chart/Sparkline.jsx'
+import { API_BASE, PUBLIC_BASE, barsUrl, fetchBars, formatPrice, isoDaysAgo } from './lib/api.js'
+import './theme.css'
+
+const HERO_TICKERS = ['CUCKOO', 'CRASH', 'MOON', 'GAPPY', 'HALTS', 'SPIKEY']
+
+const SCENARIOS = [
+  ['CRASH', 'Sharp ~25% crash mid-month, slow grind back. Every month, forever.'],
+  ['MOON', 'Parabolic pump peaking late in the month, then a hard correction.'],
+  ['FLAT', 'Zero-range bars at exactly $100.00 — breaks naive chart scaling.'],
+  ['GAPPY', 'Overnight gaps of 5-15% most days, quiet sessions between.'],
+  ['HALTS', 'Minute bars go missing during intraday halt windows.'],
+  ['SPIKEY', 'Single-minute fat-finger wicks that instantly revert.'],
+  ['PENNY', 'Sub-dollar prices with four decimals — flushes float bugs.'],
+  ['CHOPPY', 'High volatility, zero net drift. Mean-reversion torture test.'],
+]
+
+function CopyButton({ text }) {
+  const [done, setDone] = useState(false)
+  return (
+    <button
+      type="button"
+      className={`copy${done ? ' done' : ''}`}
+      onClick={() => {
+        navigator.clipboard?.writeText(text)
+        setDone(true)
+        setTimeout(() => setDone(false), 1400)
+      }}
+    >
+      {done ? 'copied' : 'copy'}
+    </button>
+  )
+}
+
+function HeroChart() {
+  const [ticker, setTicker] = useState('CUCKOO')
+  const [bars, setBars] = useState(null)
+  const [drawKey, setDrawKey] = useState(0)
+
+  const params = { symbols: ticker, timeframe: '1Day', start: isoDaysAgo(120) }
+  const curl = `curl '${barsUrl(params, PUBLIC_BASE)}'`
+
+  useEffect(() => {
+    let cancelled = false
+    fetchBars(params).then((data) => {
+      if (cancelled) return
+      setBars(data.bars[ticker] ?? [])
+      setDrawKey((k) => k + 1)
+    }).catch(() => !cancelled && setBars([]))
+    return () => { cancelled = true }
+  }, [ticker])
+
+  return (
+    <div className="panel">
+      <div className="panel-title">
+        <span className="dot live" />
+        <span>{ticker} · 1Day · last 120 days · synthetic</span>
+      </div>
+      <div className="scenario-row" role="group" aria-label="Pick a ticker">
+        {HERO_TICKERS.map((t) => (
+          <button key={t} type="button" className={`chip${t === ticker ? ' active' : ''}`} onClick={() => setTicker(t)}>
+            {t}
+          </button>
+        ))}
+      </div>
+      {bars == null ? (
+        <div className="chart-empty">loading…</div>
+      ) : (
+        <LineChart series={[{ name: ticker, color: 'var(--accent)', bars }]} drawKey={`${ticker}:${drawKey}`} />
+      )}
+      <pre className="curl-line"><span className="prompt">$</span> {curl} <CopyButton text={curl} /></pre>
+    </div>
+  )
+}
+
+function TickerStrip() {
+  const [prices, setPrices] = useState({})
+  const prev = useRef({})
+
+  useEffect(() => {
+    const source = new EventSource(`${API_BASE}/v1/stream?symbols=CUCKOO,CRASH,MOON,PENNY`)
+    source.addEventListener('tick', (e) => {
+      const { S, p } = JSON.parse(e.data)
+      setPrices((old) => {
+        prev.current[S] = old[S]?.p
+        return { ...old, [S]: { p, dir: old[S] ? Math.sign(p - old[S].p) : 0 } }
+      })
+    })
+    source.onerror = () => {}  // EventSource auto-reconnects
+    return () => source.close()
+  }, [])
+
+  const symbols = Object.keys(prices)
+  if (symbols.length === 0) return null
+  return (
+    <div className="ticker-strip" aria-label="Live simulated ticks">
+      <span className="tag">live·sse</span>
+      {symbols.map((s) => (
+        <span key={s}>
+          <span className="sym">{s} </span>
+          <span className={`px${prices[s].dir > 0 ? ' up' : prices[s].dir < 0 ? ' down' : ''}`}>
+            {formatPrice(prices[s].p)}
+          </span>
+        </span>
+      ))}
+    </div>
+  )
+}
+
+function Gallery() {
+  const [bars, setBars] = useState({})
+
+  useEffect(() => {
+    fetchBars({
+      symbols: SCENARIOS.map(([t]) => t).join(','),
+      timeframe: '1Day',
+      start: isoDaysAgo(45),
+    }).then((data) => setBars(data.bars)).catch(() => {})
+  }, [])
+
+  return (
+    <div className="gallery">
+      {SCENARIOS.map(([t, desc]) => (
+        <div
+          key={t}
+          className="card"
+          role="link"
+          tabIndex={0}
+          aria-label={`${t}: ${desc}`}
+          onClick={() => { window.location.href = `/playground?symbols=${t}` }}
+          onKeyDown={(e) => e.key === 'Enter' && (window.location.href = `/playground?symbols=${t}`)}
+        >
+          <div className="name">${t}</div>
+          <div className="desc">{desc}</div>
+          <Sparkline bars={bars[t]} />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+const PROOF_PARAMS = {
+  symbols: 'SPY',
+  timeframe: '1Day',
+  start: '2026-01-05',
+  end: '2026-03-31',
+  seed: '42',
+}
+
+function DeterminismProof() {
+  const [runs, setRuns] = useState(null)
+
+  useEffect(() => {
+    async function fetchOnce() {
+      // no-store so both requests genuinely leave the browser.
+      const res = await fetch(barsUrl(PROOF_PARAMS), { cache: 'no-store' })
+      const text = await res.text()
+      let hash = ''
+      if (crypto?.subtle) {
+        const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
+        hash = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('')
+      }
+      return { bars: JSON.parse(text).bars.SPY, hash }
+    }
+    Promise.all([fetchOnce(), fetchOnce()]).then(setRuns).catch(() => {})
+  }, [])
+
+  if (!runs) return <div className="chart-empty">fetching the same request twice…</div>
+  const identical = runs[0].hash === runs[1].hash
+  return (
+    <div className="proof-grid">
+      {runs.map((run, i) => (
+        <div className="panel" key={i}>
+          <div className="panel-title">
+            <span className="dot" />
+            <span>request #{i + 1} · SPY · seed=42</span>
+          </div>
+          <LineChart series={[{ name: 'SPY', color: 'var(--s1)', bars: run.bars }]} drawKey={i} height={220} />
+          <div className="hash">
+            sha256 {run.hash.slice(0, 32)}… {identical && <b>· identical</b>}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function mount(id, node) {
+  const el = document.getElementById(id)
+  if (el) createRoot(el).render(<StrictMode>{node}</StrictMode>)
+}
+
+mount('island-hero', <HeroChart />)
+mount('island-ticker', <TickerStrip />)
+mount('island-gallery', <Gallery />)
+mount('island-proof', <DeterminismProof />)
+
+// Code tabs + static copy buttons: plain DOM, no React needed.
+for (const tabs of document.querySelectorAll('.tabs')) {
+  tabs.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-pane]')
+    if (!btn) return
+    const panes = tabs.parentElement.querySelectorAll('[data-pane-id]')
+    for (const b of tabs.querySelectorAll('button')) b.classList.toggle('active', b === btn)
+    for (const p of panes) p.classList.toggle('active', p.dataset.paneId === btn.dataset.pane)
+  })
+}
+for (const btn of document.querySelectorAll('button.copy[data-copy-target]')) {
+  btn.addEventListener('click', () => {
+    const target = document.querySelector(btn.dataset.copyTarget)
+    navigator.clipboard?.writeText(target.textContent.replace(/^\$ /, ''))
+    btn.classList.add('done')
+    btn.textContent = 'copied'
+    setTimeout(() => {
+      btn.classList.remove('done')
+      btn.textContent = 'copy'
+    }, 1400)
+  })
+}

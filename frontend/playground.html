@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Playground — CuckooTrade</title>
+    <meta name="description" content="Query CuckooTrade's fake market data API live: any symbol, any timeframe, magic tickers, seeds, and CSV export. No key required." />
+    <link rel="canonical" href="https://cuckootrade.com/playground" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="robots" content="index,follow" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="masthead">
+        <span class="wordmark"><a href="/" style="color:inherit">CUCKOO<b>TRADE</b></a></span>
+        <nav>
+          <a href="/">home</a>
+          <a href="/docs">docs</a>
+          <a href="/api/docs">openapi</a>
+          <a href="https://github.com/tj-miller-dev/stock_simulator">github</a>
+        </nav>
+      </header>
+      <div id="root">
+        <p>The playground needs JavaScript. The API itself doesn't:
+        <code>curl 'https://cuckootrade.com/api/v2/stocks/bars?symbols=AAPL'</code></p>
+      </div>
+    </div>
+    <script type="module" src="/src/playground.jsx"></script>
+  </body>
+</html>

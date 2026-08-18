@@ -1,0 +1,52 @@
+# CuckooTrade
+
+> Free, deterministic, Alpaca-compatible FAKE market data API. No API key, no
+> signup. All data is synthetic — for development, CI, demos, and teaching,
+> never for real trading decisions or strategy validation.
+
+Base URL: https://cuckootrade.com/api
+
+## Why use it
+- No auth: the first request works from curl, CI, or a coding agent.
+- Deterministic: identical requests return identical bars, forever
+  (generation-versioned). Optional &seed=<any-string> selects an alternate
+  universe. Only completed bars are served, so responses are reproducible.
+- Alpaca wire-compatible: alpaca-py works unmodified with
+  url_override="https://cuckootrade.com/api" (API keys: any non-empty strings).
+- Magic tickers with scripted behavior for testing edge cases.
+
+## Endpoints
+- GET /api — machine-readable index (start here)
+- GET /api/v2/stocks/bars?symbols=AAPL,CRASH&timeframe=1Day&start=2026-07-01
+  Alpaca-shaped bars: {"bars": {SYM: [{t,o,h,l,c,v,n,vw}]}, "next_page_token"}.
+  Params: symbols (required, ≤50), timeframe ([1-59]Min, [1-23]Hour, 1Day,
+  1Week, [1,2,3,4,6,12]Month), start, end, limit (total bars across symbols,
+  ≤10000, then next_page_token → page_token), sort (asc|desc), seed,
+  generation. adjustment/feed/asof/currency accepted and ignored.
+- GET /api/v2/stocks/{symbol}/bars — single-symbol variant
+- GET /api/v2/stocks/bars/latest?symbols=AAPL,SPY — last completed bar each
+- GET /api/v1/stream?symbols=CUCKOO — SSE ticks. clock=demo (default) is an
+  always-open synthetic session; clock=real follows the NYSE calendar.
+  curl -N works. ≤10 symbols, ≤5 streams/address, 15-min max per connection.
+
+## Behavior
+- NYSE calendar: no bars on weekends/US market holidays; intraday bars only
+  09:30–16:00 ET. Daily+ bars are timestamped midnight ET (in UTC).
+- Coarser timeframes aggregate exactly from finer ones (coherent OHLCV).
+- Any well-formed symbol works: ~130 famous tickers have curated plausible
+  price levels; every other string gets a stable hash-derived personality.
+- Magic tickers (calendar-anchored, visible in any 30-day window):
+  CRASH (~25% mid-month crash), MOON (monthly parabolic pump), FLAT (o=h=l=c
+  at $100), GAPPY (±5-15% overnight gaps), HALTS (missing minute bars),
+  SPIKEY (one-minute wicks), PENNY (~$0.30, 4 decimals), CHOPPY (high vol,
+  no drift).
+- Errors: {"code": int, "message": str}; messages include the valid grammar
+  and a working example URL. 429 = rate limited (60/min sustained per address,
+  burst 120); honor RateLimit-Reset.
+- Every response carries X-Cuckoo-Synthetic: true.
+
+## Links
+- Docs: https://cuckootrade.com/docs
+- OpenAPI: https://cuckootrade.com/api/openapi.json
+- Playground: https://cuckootrade.com/playground
+- Source (MIT): https://github.com/tj-miller-dev/stock_simulator
