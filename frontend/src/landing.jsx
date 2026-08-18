@@ -8,14 +8,14 @@ import './theme.css'
 const HERO_TICKERS = ['CUCKOO', 'CRASH', 'MOON', 'GAPPY', 'HALTS', 'SPIKEY']
 
 const SCENARIOS = [
-  ['CRASH', 'Sharp ~25% crash mid-month, slow grind back. Every month, forever.'],
-  ['MOON', 'Parabolic pump peaking late in the month, then a hard correction.'],
-  ['FLAT', 'Zero-range bars at exactly $100.00 — breaks naive chart scaling.'],
-  ['GAPPY', 'Overnight gaps of 5-15% most days, quiet sessions between.'],
+  ['CRASH', 'A ~25% crash mid-month with a slow recovery. Repeats every month.'],
+  ['MOON', 'Parabolic run-up peaking late in the month, then a hard correction.'],
+  ['FLAT', 'Zero-range bars pinned at exactly $100.00 — breaks naive chart autoscaling.'],
+  ['GAPPY', 'Overnight gaps of 5–15% most days, with quiet sessions between.'],
   ['HALTS', 'Minute bars go missing during intraday halt windows.'],
-  ['SPIKEY', 'Single-minute fat-finger wicks that instantly revert.'],
-  ['PENNY', 'Sub-dollar prices with four decimals — flushes float bugs.'],
-  ['CHOPPY', 'High volatility, zero net drift. Mean-reversion torture test.'],
+  ['SPIKEY', 'Single-minute wicks that spike and instantly revert.'],
+  ['PENNY', 'Sub-dollar prices with four decimal places — surfaces precision bugs.'],
+  ['CHOPPY', 'High volatility with zero net drift — stress-tests mean-reversion logic.'],
 ]
 
 function CopyButton({ text }) {
@@ -178,7 +178,7 @@ function DeterminismProof() {
             <span className="dot" />
             <span>request #{i + 1} · SPY · seed=42</span>
           </div>
-          <LineChart series={[{ name: 'SPY', color: 'var(--s1)', bars: run.bars }]} drawKey={i} height={220} />
+          <LineChart series={[{ name: 'SPY', color: 'var(--s1)', bars: run.bars }]} drawKey={i} height={160} />
           <div className="hash">
             sha256 {run.hash.slice(0, 32)}… {identical && <b>· identical</b>}
           </div>

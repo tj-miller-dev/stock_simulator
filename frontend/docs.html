@@ -4,10 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Docs — CuckooTrade</title>
-    <meta name="description" content="CuckooTrade API documentation: Alpaca-compatible bars endpoint, determinism guarantee, magic tickers, SSE streaming, rate limits. No API key required." />
+    <meta name="description" content="CuckooTrade API documentation: Alpaca-compatible bars endpoint, determinism guarantee, scenario tickers, SSE streaming, rate limits. No API key required." />
     <link rel="canonical" href="https://cuckootrade.com/docs" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <style>
+      section { padding: 48px 0 0; }
       .doc-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
       .doc-table th, .doc-table td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
       .doc-table th { font-family: var(--mono); font-weight: 400; color: var(--ink-3); font-size: 0.75rem; text-transform: uppercase; }
@@ -15,26 +19,29 @@
       .doc-table code { color: var(--accent); }
       .doc-pre { margin: 0; padding: 14px 16px; overflow-x: auto; background: var(--bg-inset); font-size: 0.82rem; line-height: 1.6; }
       section p code, section li code { background: var(--bg-inset); padding: 1px 5px; border-radius: 3px; font-size: 0.85em; }
-      .toc { font-family: var(--mono); font-size: 0.85rem; display: flex; flex-wrap: wrap; gap: 8px 20px; padding: 14px 0; }
+      .toc { font-family: var(--mono); font-size: 0.85rem; display: flex; flex-wrap: wrap; gap: 8px 20px; padding: 22px 0 0; }
+      h2.mono { font-size: 1.25rem; letter-spacing: 0; }
     </style>
   </head>
   <body>
-    <div class="shell">
-      <header class="masthead">
+    <header class="masthead">
+      <div class="masthead-inner">
         <span class="wordmark"><a href="/" style="color:inherit">CUCKOO<b>TRADE</b></a></span>
         <nav>
-          <a href="/">home</a>
-          <a href="/playground">playground</a>
-          <a href="/api/docs">openapi</a>
-          <a href="https://github.com/tj-miller-dev/stock_simulator">github</a>
+          <a href="/playground">Playground</a>
+          <a href="/docs">Docs</a>
+          <a href="https://github.com/tj-miller-dev/stock_simulator">GitHub</a>
+          <a class="btn btn-primary btn-sm" href="#quickstart">Get started</a>
         </nav>
-      </header>
+      </div>
+    </header>
 
+    <div class="shell">
       <nav class="toc" aria-label="Contents">
         <a href="#quickstart">quickstart</a>
         <a href="#bars">bars</a>
         <a href="#determinism">determinism</a>
-        <a href="#magic">magic tickers</a>
+        <a href="#magic">scenario tickers</a>
         <a href="#stream">stream</a>
         <a href="#limits">rate limits</a>
         <a href="#self-host">self-hosting</a>
@@ -42,7 +49,7 @@
       </nav>
 
       <section id="quickstart">
-        <h2>quickstart</h2>
+        <h2>Quickstart</h2>
         <p>No key, no signup. This works right now, from anywhere:</p>
         <div class="panel" style="position:relative">
           <button type="button" class="copy" style="position:absolute;top:10px;right:10px" data-copy-target="#qs">copy</button>
@@ -51,14 +58,15 @@
         <p>
           Using <a href="https://github.com/alpacahq/alpaca-py">alpaca-py</a>? Pass
           <code>url_override="https://cuckootrade.com/api"</code> and any non-empty
-          strings as keys — they're never checked. The machine-readable index at
-          <a href="/api">/api</a> and <a href="/llms.txt">/llms.txt</a> exist so
-          coding agents can orient without this page.
+          strings as API keys — they're never checked. The API is also
+          self-describing: <a href="/api">/api</a> returns a machine-readable index,
+          and <a href="/llms.txt">/llms.txt</a> summarizes everything for AI coding
+          tools.
         </p>
       </section>
 
       <section id="bars">
-        <h2>GET /api/v2/stocks/bars</h2>
+        <h2 class="mono">GET /api/v2/stocks/bars</h2>
         <p>
           Alpaca-compatible historical OHLCV bars. Regular sessions only
           (09:30–16:00 ET, NYSE calendar — weekends and US market holidays have no
@@ -72,7 +80,7 @@
           <tr><td>start / end</td><td>RFC-3339 or YYYY-MM-DD, inclusive. Defaults: last 30 days. Weeks/months clipped by the window are dropped, not served partial.</td></tr>
           <tr><td>limit</td><td>total bars across all symbols, 1–10000 (default 1000). More data ⇒ <code>next_page_token</code>; pass it back as <code>page_token</code>.</td></tr>
           <tr><td>sort</td><td><code>asc</code> (default) or <code>desc</code>.</td></tr>
-          <tr><td>seed</td><td><b>cuckoo extension.</b> Any string; selects an alternate universe with the same statistical character. Omitted = the canonical universe everyone shares.</td></tr>
+          <tr><td>seed</td><td><b>cuckoo extension.</b> Any string; returns a different but equally deterministic dataset with the same statistical character. Omit it for the shared default dataset.</td></tr>
           <tr><td>generation</td><td><b>cuckoo extension.</b> Pins the generator version (currently 1). Responses carry <code>X-Cuckoo-Generation</code>.</td></tr>
           <tr><td>adjustment, feed, asof, currency</td><td>accepted and ignored, for Alpaca client compatibility. No corporate actions exist in generation 1.</td></tr>
         </table>
@@ -85,41 +93,41 @@
       </section>
 
       <section id="determinism">
-        <h2>the determinism guarantee</h2>
+        <h2>The determinism guarantee</h2>
         <p>
           Every bar is a pure function of (symbol, timestamp, generation, seed).
           Identical requests return identical bytes, forever, within a generation —
           there is no database and no randomness at request time, which is also why
           fully-specified historical responses ship
-          <code>Cache-Control: immutable</code>. If the generator ever improves, that
-          becomes generation 2; generation 1 stays queryable. Commit fixtures,
-          seed CI, and sleep well.
+          <code>Cache-Control: immutable</code>. If the generator ever improves,
+          that becomes generation 2; generation 1 stays queryable, so committed
+          fixtures never break.
         </p>
       </section>
 
       <section id="magic">
-        <h2>magic tickers</h2>
+        <h2>Scenario tickers</h2>
         <p>
-          Reserved symbols with scripted, calendar-anchored behavior. Every ticker
-          shows its signature inside any 30-day window, so a demo never catches a
-          quiet stretch. Schema stays valid — the drama is in the numbers, never in
-          malformed fields.
+          Reserved symbols with scripted, calendar-anchored behavior. Every pattern
+          appears within any 30-day window, so a demo or test never catches a quiet
+          stretch. Responses stay schema-valid — the stress is in the values, never
+          in malformed fields.
         </p>
         <table class="doc-table">
           <tr><th>ticker</th><th>behavior</th></tr>
           <tr><td>CRASH</td><td>sharp ~25% crash mid-month, slow grind recovery</td></tr>
-          <tr><td>MOON</td><td>parabolic pump peaking late in the month, hard correction</td></tr>
+          <tr><td>MOON</td><td>parabolic run-up peaking late in the month, hard correction</td></tr>
           <tr><td>FLAT</td><td>zero-range bars pinned at $100.00 — breaks naive autoscaling</td></tr>
           <tr><td>GAPPY</td><td>±5–15% overnight gaps most days, quiet sessions</td></tr>
           <tr><td>HALTS</td><td>minute bars absent during intraday halt windows</td></tr>
-          <tr><td>SPIKEY</td><td>single-minute fat-finger wicks that instantly revert</td></tr>
+          <tr><td>SPIKEY</td><td>single-minute wicks that spike and instantly revert</td></tr>
           <tr><td>PENNY</td><td>~$0.30 prices, four decimals, high volatility</td></tr>
           <tr><td>CHOPPY</td><td>high volatility, zero net drift</td></tr>
         </table>
       </section>
 
       <section id="stream">
-        <h2>GET /api/v1/stream (SSE)</h2>
+        <h2 class="mono">GET /api/v1/stream (SSE)</h2>
         <p>
           Server-sent events — curl-able, no WebSocket library needed. Two clocks:
           <code>clock=demo</code> (default) is an always-open synthetic session whose
@@ -136,51 +144,76 @@
       </section>
 
       <section id="limits">
-        <h2>rate limits</h2>
+        <h2>Rate limits</h2>
         <p>
-          60 requests/minute sustained per address, with burst headroom to 120 —
-          keyless, on purpose. Responses carry
-          <code>RateLimit-Limit / -Remaining / -Reset</code> headers; a 429 tells
-          you exactly how long to back off. (Honesty note: limits are enforced
-          per-replica, so the effective ceiling is a small multiple of the
-          advertised one. It's a fake data API, not a bank.)
+          60 requests per minute sustained per address, with burst headroom to 120 —
+          no key required. Responses carry
+          <code>RateLimit-Limit / -Remaining / -Reset</code> headers, and a 429
+          tells you exactly how long to back off. Limits are enforced per replica,
+          so the effective ceiling may be somewhat higher than advertised.
         </p>
       </section>
 
       <section id="self-host">
-        <h2>self-hosting</h2>
+        <h2>Self-hosting</h2>
         <p>
-          The whole thing is MIT-licensed and stateless — CI pipelines shouldn't
-          depend on someone else's hobby cluster. Clone
+          The API is stateless and MIT-licensed. If your CI pipeline shouldn't
+          depend on an external service, run your own instance: clone
           <a href="https://github.com/tj-miller-dev/stock_simulator">the repo</a> and
-          run the API locally: <code>pip install -r api/requirements.txt &amp;&amp;
-          python api/api.py</code>. Determinism means your local instance serves
+          start it with <code>pip install -r api/requirements.txt &amp;&amp;
+          python api/api.py</code>, or pull the prebuilt container image published
+          alongside the repo. Determinism means a local instance serves
           byte-identical data to cuckootrade.com for the same generation.
         </p>
       </section>
 
       <section id="disclaimer">
         <div class="disclaimer">
-          <b>disclaimer, loudly:</b> every response is synthetic and marked so
-          (<code>X-Cuckoo-Synthetic: true</code>). CuckooTrade exercises code paths —
-          development, CI, demos, teaching. It is not market data and must never
-          inform a real trade. A profitable backtest on synthetic data means
-          <em>nothing</em>. If your strategy beats a random-walk generator, it has
-          discovered the generator, not alpha.
+          <b>All data is synthetic.</b> Every response is generated and marked with
+          <code>X-Cuckoo-Synthetic: true</code>. CuckooTrade exists to exercise
+          code paths — development, CI, demos, teaching. It is not market data,
+          must never inform a real trade, and is not a backtesting tool: a strategy
+          that profits against synthetic data has learned the generator, not the
+          market.
         </div>
       </section>
-
-      <footer>
-        <div class="cols">
-          <a href="/">home</a>
-          <a href="/playground">playground</a>
-          <a href="/api">api index</a>
-          <a href="/api/docs">swagger</a>
-          <a href="/llms.txt">llms.txt</a>
-        </div>
-        <p>Synthetic data, generation 1, served with a straight face.</p>
-      </footer>
     </div>
+
+    <footer>
+      <div class="foot-inner">
+        <div class="foot-grid">
+          <div class="foot-brand">
+            <span class="wordmark">CUCKOO<b>TRADE</b></span>
+            <p>A free, deterministic, Alpaca-compatible market data API. Openly
+            synthetic — built for development, CI, demos, and teaching.</p>
+          </div>
+          <div class="foot-col">
+            <h4>Product</h4>
+            <a href="/playground">Playground</a>
+            <a href="/docs">Documentation</a>
+            <a href="/api">API index</a>
+            <a href="/api/docs">OpenAPI docs</a>
+          </div>
+          <div class="foot-col">
+            <h4>Developers</h4>
+            <a href="https://github.com/tj-miller-dev/stock_simulator">GitHub</a>
+            <a href="/api/openapi.json">openapi.json</a>
+            <a href="/llms.txt">llms.txt</a>
+            <a href="/docs#self-host">Self-hosting</a>
+          </div>
+          <div class="foot-col">
+            <h4>Trust</h4>
+            <a href="/docs#disclaimer">Synthetic-data disclosure</a>
+            <a href="/docs#limits">Rate limits</a>
+            <a href="https://github.com/tj-miller-dev/stock_simulator/blob/main/LICENSE">MIT license</a>
+          </div>
+        </div>
+        <div class="fine">
+          <p>© 2026 CuckooTrade. Open source — the API, the frontend, and the infrastructure that runs them.</p>
+          <p>All data on this site is synthetic. Not market data, not investment advice.</p>
+        </div>
+      </div>
+    </footer>
     <script type="module" src="/src/docs.js"></script>
   </body>
 </html>

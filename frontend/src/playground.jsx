@@ -85,12 +85,13 @@ function App() {
 
   return (
     <>
-      <section style={{ paddingTop: 24 }}>
-        <h2>playground</h2>
+      <section style={{ paddingTop: 32 }}>
+        <h2>Playground</h2>
         <p>
-          Query the bars endpoint live. Every well-formed symbol works — famous ones
-          have curated personalities, unknown ones get stable hash-derived traits,
-          and the <a href="/docs#magic">magic tickers</a> are scripted drama.
+          Query the bars endpoint live. Any well-formed symbol works — well-known
+          tickers have curated price levels, unknown symbols get a stable
+          hash-derived personality, and the{' '}
+          <a href="/docs#magic">scenario tickers</a> return scripted behavior.
         </p>
         <div className="panel">
           <div className="pg-controls">
@@ -123,7 +124,7 @@ function App() {
           </div>
           <div className="scenario-row">
             <button type="button" className="go" onClick={() => run()} disabled={loading}>
-              {loading ? 'fetching…' : 'fetch bars'}
+              {loading ? 'Fetching…' : 'Fetch bars'}
             </button>
             {MAGIC.map((t) => (
               <button
@@ -156,7 +157,7 @@ function App() {
           </div>
           <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
             <button type="button" className="ghost" onClick={() => downloadCsv(result.bars)}>
-              download csv
+              Download CSV
             </button>
             {result?.next_page_token && (
               <span className="mono" style={{ fontSize: '0.75rem', color: 'var(--ink-3)', alignSelf: 'center' }}>
@@ -169,7 +170,7 @@ function App() {
 
       {result && (
         <section>
-          <h2>raw response</h2>
+          <h2>Raw response</h2>
           <div className="panel">
             <pre className="pg-json">{JSON.stringify(result, null, 2)}</pre>
           </div>

@@ -14,7 +14,6 @@ const W = 760
 const H = 340
 const MARGIN = { top: 16, right: 76, bottom: 28, left: 64 }
 const PW = W - MARGIN.left - MARGIN.right
-const PH = H - MARGIN.top - MARGIN.bottom
 
 function niceTicks(min, max, count) {
   if (min === max) return [min]
@@ -81,7 +80,8 @@ export default function LineChart({ series, drawKey, height = H }) {
   const pad = (rawMax - rawMin) * 0.08 || rawMax * 0.05 || 1
   const yMin = rawMin - pad
   const yMax = rawMax + pad
-  const yAt = (v) => MARGIN.top + (1 - (v - yMin) / (yMax - yMin)) * PH
+  const ph = height - MARGIN.top - MARGIN.bottom
+  const yAt = (v) => MARGIN.top + (1 - (v - yMin) / (yMax - yMin)) * ph
 
   const yTicks = niceTicks(yMin, yMax, 4).filter((t) => t >= yMin && t <= yMax)
   const longest = drawn.reduce((a, b) => (a.bars.length >= b.bars.length ? a : b))
