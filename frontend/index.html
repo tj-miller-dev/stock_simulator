@@ -4,14 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>CuckooTrade — Market data for everything before production</title>
-    <meta name="description" content="A free, deterministic, Alpaca-compatible market data API serving openly synthetic data. No API key, no signup. Build, test, and demo against stable data, then switch to your real provider by changing one line." />
+    <meta name="description" content="A free, deterministic market data API serving openly synthetic data over the wire formats of Alpaca, Alpha Vantage, and Polygon. No API key, no signup. Build, test, and demo against stable data, then switch to your real provider by changing one line." />
     <link rel="canonical" href="https://cuckootrade.com/" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <meta property="og:title" content="CuckooTrade — Market data for everything before production" />
-    <meta property="og:description" content="Free, deterministic, Alpaca-compatible synthetic market data over HTTP. No key, no signup. Scenario tickers like CRASH reproduce a flash crash on demand." />
+    <meta property="og:description" content="Free, deterministic synthetic market data speaking Alpaca, Alpha Vantage, and Polygon wire formats. No key, no signup. Scenario tickers like CRASH reproduce a flash crash on demand." />
     <meta property="og:url" content="https://cuckootrade.com/" />
     <meta property="og:type" content="website" />
     <script type="application/ld+json">
@@ -19,7 +19,7 @@
       "@context": "https://schema.org",
       "@type": "WebAPI",
       "name": "CuckooTrade",
-      "description": "Free, deterministic, Alpaca-compatible synthetic market data API for development, CI pipelines, demos, and teaching. No API key required. All data is synthetic.",
+      "description": "Free, deterministic synthetic market data API for development, CI pipelines, demos, and teaching. Wire-compatible with Alpaca, Alpha Vantage, and Polygon. No API key required. All data is synthetic.",
       "url": "https://cuckootrade.com/",
       "documentation": "https://cuckootrade.com/docs",
       "termsOfService": "https://cuckootrade.com/docs#disclaimer",
@@ -55,10 +55,10 @@
           <span class="eyebrow">Synthetic market data API</span>
           <h1>Market data for everything <span class="accent">before</span> production.</h1>
           <p class="sub">
-            CuckooTrade is a free, deterministic, Alpaca-compatible API serving
-            realistic synthetic data. Build features, run CI, and give demos against
-            stable market data — then switch to your real provider by changing one
-            line.
+            CuckooTrade is a free, deterministic API that serves realistic synthetic
+            data over the wire formats of Alpaca, Alpha Vantage, and Polygon. Build
+            features, run CI, and give demos against stable market data — then
+            switch to your real provider by changing one line.
           </p>
           <div class="hero-ctas">
             <a class="btn btn-primary" href="/playground">Open the playground</a>
@@ -83,37 +83,51 @@
 
       <div class="stats" aria-label="Key facts">
         <div class="stat"><b>1 line</b><span>to switch to your real provider</span></div>
+        <div class="stat"><b>3</b><span>provider wire formats mimicked</span></div>
         <div class="stat"><b>100%</b><span>reproducible, byte for byte</span></div>
-        <div class="stat"><b>8</b><span>scripted scenario tickers</span></div>
         <div class="stat"><b>24/7</b><span>synthetic sessions, even when markets close</span></div>
       </div>
 
       <section id="one-line" class="split">
         <div class="copyblock">
           <span class="eyebrow">Compatibility</span>
-          <h2>A drop-in for the Alpaca data API</h2>
+          <h2>A drop-in for the API you already use</h2>
           <p>
-            Same paths, same parameters, same JSON shape as
-            <code>data.alpaca.markets</code>. Official SDKs like
-            <a href="https://github.com/alpacahq/alpaca-py">alpaca-py</a> work
-            unmodified — override one base URL to develop against CuckooTrade, then
-            point it back when you're ready for live data.
+            Same paths, same parameters, same JSON shape as the provider you're
+            replacing — <a href="/docs#bars">Alpaca</a>,
+            <a href="/docs#alphavantage">Alpha Vantage</a>, or
+            <a href="/docs#polygon">Polygon</a>. Your client works unmodified:
+            change the base URL to develop against CuckooTrade, then point it back
+            when you're ready for live data.
           </p>
           <p>
-            The provider lives in the path — <code>/api/v1/alpaca/…</code> — so
-            support for additional providers can mount alongside without breaking
-            anything you've built.
+            The provider lives in the path — <code>/api/v1/alpaca/…</code>,
+            <code>/api/v1/alphavantage/…</code>, <code>/api/v1/polygon/…</code> —
+            and every surface serves the same deterministic world, so a symbol's
+            bars agree across all of them.
           </p>
-          <p><a class="more-link" href="/docs#bars">See the full endpoint reference →</a></p>
+          <p><a class="more-link" href="/docs#structure">See the full endpoint reference →</a></p>
         </div>
         <div>
           <div class="panel">
-            <div class="panel-title"><span class="dot"></span><span>your client, unchanged</span></div>
-            <pre class="diff">  client = StockHistoricalDataClient(
+            <div class="tabs" role="tablist">
+              <button type="button" data-pane="prov-alpaca" class="active">alpaca-py</button>
+              <button type="button" data-pane="prov-av">alpha vantage</button>
+              <button type="button" data-pane="prov-pg">polygon</button>
+            </div>
+            <div class="tabpanes">
+              <pre data-pane-id="prov-alpaca" class="diff active">  client = StockHistoricalDataClient(
       api_key, secret_key,
 <span class="del">-     url_override="https://data.alpaca.markets",</span>
 <span class="add">+     url_override="https://cuckootrade.com/api/v1/alpaca",</span>
   )</pre>
+              <pre data-pane-id="prov-av" class="diff"><span class="del">- curl 'https://www.alphavantage.co/query?</span>
+<span class="add">+ curl 'https://cuckootrade.com/api/v1/alphavantage/query?</span>
+      function=TIME_SERIES_DAILY&amp;symbol=IBM&amp;apikey=any'</pre>
+              <pre data-pane-id="prov-pg" class="diff"><span class="del">- curl 'https://api.polygon.io/v2/aggs/</span>
+<span class="add">+ curl 'https://cuckootrade.com/api/v1/polygon/v2/aggs/</span>
+      ticker/MSFT/range/1/day/2026-07-01/2026-08-01'</pre>
+            </div>
           </div>
         </div>
       </section>
@@ -237,7 +251,7 @@
               <button type="button" data-pane="stream">stream</button>
             </div>
             <div class="tabpanes">
-              <button type="button" class="copy" data-copy-target=".tabpanes pre.active">copy</button>
+              <button type="button" class="copy" data-copy-target="#snippets .tabpanes pre.active">copy</button>
               <pre data-pane-id="curl" class="active" id="snippet-curl">curl 'https://cuckootrade.com/api/v1/alpaca/v2/stocks/bars?symbols=AAPL,CRASH&amp;timeframe=1Day&amp;start=2026-07-01'</pre>
               <pre data-pane-id="python">from datetime import datetime
 

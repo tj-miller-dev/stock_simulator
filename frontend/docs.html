@@ -41,7 +41,9 @@
       <nav class="toc" aria-label="Contents">
         <a href="#quickstart">quickstart</a>
         <a href="#structure">structure</a>
-        <a href="#bars">bars</a>
+        <a href="#bars">alpaca</a>
+        <a href="#alphavantage">alpha vantage</a>
+        <a href="#polygon">polygon</a>
         <a href="#determinism">determinism</a>
         <a href="#magic">scenario tickers</a>
         <a href="#stream">stream</a>
@@ -79,14 +81,17 @@
         </div>
         <p>
           Everything through the provider segment is CuckooTrade's namespace;
-          everything after it replicates the provider exactly, which is why an
-          SDK only needs its base URL changed. Alpaca is the first provider —
-          <code>https://cuckootrade.com/api/v1/alpaca</code> stands in for
-          <code>https://data.alpaca.markets</code>, so the <code>v2</code> in
+          everything after it replicates the provider exactly, which is why a
+          client only needs its base URL changed. The <code>v2</code> in
           <code>/api/v1/alpaca/v2/stocks/bars</code> is Alpaca's own version, not
-          ours. Additional provider surfaces will mount alongside under their own
-          names without changing anything that exists.
+          ours. Three providers are live:
         </p>
+        <table class="doc-table">
+          <tr><th>provider</th><th>base URL</th><th>stands in for</th></tr>
+          <tr><td><a href="#bars">alpaca</a></td><td><code>https://cuckootrade.com/api/v1/alpaca</code></td><td>data.alpaca.markets</td></tr>
+          <tr><td><a href="#alphavantage">alphavantage</a></td><td><code>https://cuckootrade.com/api/v1/alphavantage</code></td><td>www.alphavantage.co</td></tr>
+          <tr><td><a href="#polygon">polygon</a></td><td><code>https://cuckootrade.com/api/v1/polygon</code></td><td>api.polygon.io</td></tr>
+        </table>
         <p>
           Two things are versioned, on purpose: the <b>path version</b>
           (<code>v1</code>) covers the API surface — paths, parameters, error
@@ -124,6 +129,72 @@
           completed bar). Errors are Alpaca-shaped
           <code>{"code", "message"}</code>, and every message states the valid
           grammar plus a working example.
+        </p>
+      </section>
+
+      <section id="alphavantage">
+        <span class="eyebrow">Provider surface · Alpha Vantage</span>
+        <h2 class="mono">GET /api/v1/alphavantage/query</h2>
+        <p>
+          Alpha Vantage's single-endpoint format, faithfully — including its
+          quirks: values are strings, series are keyed newest-first, and errors
+          come back as HTTP 200 with an <code>"Error Message"</code> body,
+          because that is how the real API reports them. <code>apikey</code>
+          accepts anything, including nothing. Intraday is a premium endpoint
+          on Alpha Vantage's free tier; here it's free like everything else.
+        </p>
+        <div class="panel" style="position:relative">
+          <button type="button" class="copy" style="position:absolute;top:10px;right:10px" data-copy-target="#av-ex">copy</button>
+          <pre class="doc-pre" id="av-ex">curl 'https://cuckootrade.com/api/v1/alphavantage/query?function=TIME_SERIES_DAILY&amp;symbol=IBM'</pre>
+        </div>
+        <table class="doc-table">
+          <tr><th>param</th><th>meaning</th></tr>
+          <tr><td>function</td><td>required: <code>TIME_SERIES_INTRADAY</code>, <code>TIME_SERIES_DAILY</code>, <code>TIME_SERIES_WEEKLY</code>, <code>TIME_SERIES_MONTHLY</code>, or <code>GLOBAL_QUOTE</code>.</td></tr>
+          <tr><td>symbol</td><td>required; one symbol. Scenario tickers work: <code>symbol=CRASH</code>.</td></tr>
+          <tr><td>interval</td><td>intraday only, required there: <code>1min</code>, <code>5min</code>, <code>15min</code>, <code>30min</code>, <code>60min</code>. Labels are interval-end times in US/Eastern.</td></tr>
+          <tr><td>outputsize</td><td><code>compact</code> (default, last 100 points) or <code>full</code> (~20 years daily; trailing 30 days intraday).</td></tr>
+          <tr><td>month</td><td>intraday only: <code>YYYY-MM</code> serves that calendar month.</td></tr>
+          <tr><td>apikey, adjusted, extended_hours</td><td>accepted and ignored.</td></tr>
+          <tr><td>seed / generation</td><td><b>cuckoo extensions</b>, same semantics as everywhere else.</td></tr>
+        </table>
+        <p>
+          Two deliberate deviations from the real thing: only <em>completed</em>
+          bars are served (no partial current day/week/month row — determinism
+          requires it), and sessions are regular-trading-hours only.
+        </p>
+      </section>
+
+      <section id="polygon">
+        <span class="eyebrow">Provider surface · Polygon</span>
+        <h2 class="mono">GET /api/v1/polygon/v2/aggs/ticker/{ticker}/range/…</h2>
+        <p>
+          Polygon's aggregates format: the same envelope
+          (<code>ticker, queryCount, resultsCount, adjusted, results, status,
+          request_id, count</code>), bars as <code>{v, vw, o, c, h, l, t, n}</code>
+          with <code>t</code> in Unix milliseconds, <code>next_url</code> cursor
+          pagination, and <code>{"status": "ERROR"}</code> error bodies.
+          <code>apiKey</code> is accepted and ignored, and <code>status</code> is
+          always <code>OK</code> — synthetic data is never delayed.
+        </p>
+        <div class="panel" style="position:relative">
+          <button type="button" class="copy" style="position:absolute;top:10px;right:10px" data-copy-target="#pg-ex">copy</button>
+          <pre class="doc-pre" id="pg-ex">curl 'https://cuckootrade.com/api/v1/polygon/v2/aggs/ticker/MSFT/range/1/day/2026-07-01/2026-08-01'</pre>
+        </div>
+        <table class="doc-table">
+          <tr><th>path / param</th><th>meaning</th></tr>
+          <tr><td>range/{multiplier}/{timespan}</td><td><code>minute</code> (1–59), <code>hour</code> (1–23), <code>day</code>, <code>week</code>, <code>month</code> (1, 2, 3, 4, 6, 12), <code>quarter</code> (1, 2, 4), <code>year</code>.</td></tr>
+          <tr><td>{from} / {to}</td><td><code>YYYY-MM-DD</code> (inclusive dates) or Unix millisecond timestamps.</td></tr>
+          <tr><td>sort</td><td><code>asc</code> (default) or <code>desc</code>.</td></tr>
+          <tr><td>limit</td><td>1–50000 (default 5000); past it, follow <code>next_url</code>.</td></tr>
+          <tr><td>adjusted, apiKey</td><td>accepted and ignored — no corporate actions exist, so adjusted and unadjusted are the same numbers.</td></tr>
+          <tr><td>seed / generation</td><td><b>cuckoo extensions</b>; carried through <code>next_url</code> automatically.</td></tr>
+        </table>
+        <p>
+          Also available:
+          <code>/api/v1/polygon/v2/aggs/ticker/{ticker}/prev</code> — the previous
+          session's daily bar, with Polygon's extra <code>"T"</code> field.
+          <code>request_id</code> is a hash of the request rather than a random
+          id, so identical requests stay byte-identical.
         </p>
       </section>
 

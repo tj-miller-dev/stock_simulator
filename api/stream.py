@@ -89,9 +89,11 @@ async def _real_events(symbols: list[str], seed: str, request: Request):
 @router.get("/api/v1/stream")
 async def sse_stream(request: Request, symbols: str = "CUCKOO", clock: str = "demo",
                      seed: str = ""):
-    from api import api_error, parse_symbols  # late import; api.py imports this module
+    from common import api_error, parse_symbols
 
-    symbol_list = parse_symbols(symbols, MAX_STREAM_SYMBOLS)
+    symbol_list = parse_symbols(
+        symbols, MAX_STREAM_SYMBOLS, example="/api/v1/stream?symbols=CUCKOO,CRASH"
+    )
     if clock not in ("demo", "real"):
         api_error(400, 40010001, f"invalid clock {clock!r}: use clock=demo "
                                  f"(always-open synthetic session, the default) or "

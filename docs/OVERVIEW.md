@@ -52,7 +52,9 @@ The combination — no single leg is unique, the set is:
 
 - **Hosted + no API key + no signup** (IP rate-limited)
 - **Deterministic**: same request returns the same bytes, forever (versioned guarantee)
-- **Wire-compatible**: real Alpaca SDKs work unmodified with only a base-URL override
+- **Wire-compatible**: real provider clients work unmodified with only a base-URL
+  override — Alpaca (`/api/v1/alpaca`), Alpha Vantage (`/api/v1/alphavantage`), and
+  Polygon (`/api/v1/polygon`), all serving the same deterministic world
 - **Scenario control**: reserved "magic tickers" (`CRASH`, `MOON`, `HALTS`, …) produce
   scripted market behavior on demand — a flash crash in staging, today. No real-data
   provider can offer this at any price. This is the headline feature.
@@ -79,12 +81,15 @@ The combination — no single leg is unique, the set is:
   [infrastructure runbook](QUICK_START.md).
 - **V1 is built** (branch `first_features`, Aug 2026). `api/engine/` is the
   deterministic hierarchical generator (calendar, personalities, magic tickers,
-  golden-file byte-stability tests); `api/api.py` is the Alpaca-compatible surface
-  with pagination, teaching errors, keyless rate limiting, and synthetic-marking
-  headers; `api/stream.py` is the SSE stream; the frontend is a three-page MPA
-  (landing with islands, /playground, /docs) in the terminal-dark theme. The
-  acceptance test suite (`api/tests/`) includes alpaca-py pointed at the server via
-  `url_override`.
+  golden-file byte-stability tests); `api/providers/` holds the provider-mimicry
+  surfaces (`alpaca.py`, `alphavantage.py`, `polygon.py` — one module per provider,
+  wire shapes verified against live captures) with pagination, teaching errors in
+  each provider's own error style, keyless rate limiting, and synthetic-marking
+  headers; `api/common.py` is the shared request plumbing; `api/stream.py` is the
+  SSE stream; the frontend is a three-page MPA (landing with islands, /playground,
+  /docs) in the terminal-dark theme. The acceptance test suite (`api/tests/`)
+  includes alpaca-py pointed at the server via `url_override` and a cross-provider
+  consistency test (same symbol+day ⇒ identical OHLCV through every surface).
 - **Repo: public** (github.com/tj-miller-dev/stock_simulator), MIT licensed, history
   verified clean of secrets. The API image also publishes to GHCR for self-hosters.
 

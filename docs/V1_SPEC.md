@@ -104,10 +104,14 @@ param applying these shapes to arbitrary symbols is a **named V1.1 candidate**, 
 Path scheme (added Aug 2026, supersedes the unversioned paths below where they
 appear elsewhere): **`/api/v1/{provider}/<the provider's own path>`** for
 provider-mimicry surfaces, `/api/v1/...` for Cuckoo-native endpoints. The path `v1`
-versions CuckooTrade's API surface; `generation` versions the data. Alpaca is the
-first provider (`/api/v1/alpaca/v2/stocks/bars` — the `v2` is Alpaca's own); future
-providers with different wire formats (IBKR, Alpha Vantage, …) mount alongside as
-their own routers. `/api` (index) and `/api/health` (probes) stay unversioned.
+versions CuckooTrade's API surface; `generation` versions the data. Providers live
+in `api/providers/`, one module per provider, each exposing `router` +
+`INDEX_ENTRY`. Live surfaces (Aug 2026): **alpaca**
+(`/api/v1/alpaca/v2/stocks/bars` — the `v2` is Alpaca's own), **alphavantage**
+(`/api/v1/alphavantage/query`, errors as HTTP 200 with `"Error Message"` like the
+real API), and **polygon** (`/api/v1/polygon/v2/aggs/...`, cursor pagination via
+`next_url`, deterministic `request_id`). Wire shapes were verified against live
+captures. `/api` (index) and `/api/health` (probes) stay unversioned.
 
 ### 3.1 `GET /api/v1/alpaca/v2/stocks/bars` — finish Alpaca compatibility
 
