@@ -283,8 +283,18 @@ button.copy.done { color: var(--good); border-color: var(--good); }
 .ribbon-item .px { color: var(--ink); transition: color 0.4s; }
 .ribbon-item .px.up { color: var(--good); }
 .ribbon-item .px.down { color: var(--critical); }
-.ribbon-item .px.up::after { content: " ▲"; font-size: 0.8em; }
-.ribbon-item .px.down::after { content: " ▼"; font-size: 0.8em; }
+/* The direction marker is always present, in a fixed-width slot. A neutral
+   tick draws a white sideways triangle rather than nothing -- a glyph that
+   appears and vanishes resizes the item, which shoves the whole marquee
+   track sideways on every flat tick. */
+.ribbon-item .px::after {
+  content: "▸";
+  display: inline-block; width: 1.2em;
+  margin-left: 0.15em; text-align: center;
+  font-size: 0.8em;
+}
+.ribbon-item .px.up::after { content: "▲"; }
+.ribbon-item .px.down::after { content: "▼"; }
 @keyframes ribbon-scroll { to { transform: translateX(-50%); } }
 @keyframes ribbon-pulse { 50% { opacity: 0.35; } }
 @media (prefers-reduced-motion: reduce) {
