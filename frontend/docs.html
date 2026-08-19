@@ -42,6 +42,7 @@
         <nav>
           <a href="/playground">Playground</a>
           <a href="/docs">Docs</a>
+          <a href="/api/docs">API Docs</a>
           <a href="https://github.com/tj-miller-dev/stock_simulator">GitHub</a>
           <a class="btn btn-primary btn-sm" href="#quickstart">Get started</a>
         </nav>
@@ -59,6 +60,8 @@
         <a href="#determinism">determinism</a>
         <a href="#magic">scenario tickers</a>
         <a href="#stream">stream</a>
+        <a href="#restatement">restatement</a>
+        <a href="#faults">fault injection</a>
         <a href="#limits">rate limits</a>
         <a href="#self-host">self-hosting</a>
         <a href="#disclaimer">disclaimer</a>
@@ -242,9 +245,13 @@
           <tr><td>FLAT</td><td>zero-range bars pinned at $100.00 — breaks naive autoscaling</td></tr>
           <tr><td>GAPPY</td><td>±5–15% overnight gaps most days, quiet sessions</td></tr>
           <tr><td>HALTS</td><td>minute bars absent during intraday halt windows</td></tr>
+          <tr><td>STALE</td><td>feed freezes mid-session: price repeats, volume is zero, timestamps keep advancing</td></tr>
           <tr><td>SPIKEY</td><td>single-minute wicks that spike and instantly revert</td></tr>
           <tr><td>PENNY</td><td>~$0.30 prices, four decimals, high volatility</td></tr>
           <tr><td>CHOPPY</td><td>high volatility, zero net drift</td></tr>
+          <tr><td>SPLITS</td><td>2:1 forward split monthly — prior closes halve once it goes ex (see <a href="#restatement">restatement</a>)</td></tr>
+          <tr><td>DIVVY</td><td>monthly dividend whose ~1.5% adjustment lands five sessions late</td></tr>
+          <tr><td>REVISED</td><td>a bad print that stays in history until the exchange busts the trade</td></tr>
         </table>
       </section>
 
@@ -265,6 +272,113 @@
           <button type="button" class="copy" style="position:absolute;top:10px;right:10px" data-copy-target="#sse">copy</button>
           <pre class="doc-pre" id="sse">curl -N 'https://cuckootrade.com/api/v1/stream?symbols=CUCKOO,CRASH'</pre>
         </div>
+      </section>
+
+      <section id="restatement">
+        <span class="eyebrow">CuckooTrade native</span>
+        <h2 class="mono">as_of — restatement</h2>
+        <p>
+          Real feeds rewrite history. A split or a late dividend adjustment
+          restates bars you already stored, so the same request today and next
+          month does not hand back the same bytes. If you keep bars in a
+          database, that is the case your reconciliation job exists to catch —
+          and the one nothing else will let you rehearse.
+        </p>
+        <p>
+          <code>as_of</code> models it without giving up determinism. It is a
+          second axis, not a loophole: <b>pin <code>as_of</code> and the bytes
+          are frozen forever</b>, exactly as the
+          <a href="#determinism">determinism guarantee</a> promises. Omit it —
+          the default — and you get what the feed would say today, which for a
+          restating ticker is not what it said last month. Because the schedule
+          is calendar-anchored, you can test a restatement by moving
+          <code>as_of</code> across the date instead of waiting for one:
+        </p>
+        <div class="panel" style="position:relative">
+          <button type="button" class="copy" style="position:absolute;top:10px;right:10px" data-copy-target="#asof-eg">copy</button>
+          <pre class="doc-pre" id="asof-eg"># before the split processes
+curl 'https://cuckootrade.com/api/v1/alpaca/v2/stocks/bars?symbols=SPLITS&amp;timeframe=1Day&amp;start=2026-06-01&amp;end=2026-06-30&amp;as_of=2026-07-09'
+
+# after — same window, same request, every close halved
+curl 'https://cuckootrade.com/api/v1/alpaca/v2/stocks/bars?symbols=SPLITS&amp;timeframe=1Day&amp;start=2026-06-01&amp;end=2026-06-30&amp;as_of=2026-07-13'
+
+# and the ledger that says why
+curl 'https://cuckootrade.com/api/v1/corporate-actions?symbols=SPLITS,DIVVY'</pre>
+        </div>
+        <table class="doc-table">
+          <tr><th>param</th><th>meaning</th></tr>
+          <tr><td>as_of</td><td>answer as the feed would have on this date (RFC-3339). Defaults to now. <b>Not</b> Alpaca's <code>asof</code>, which is a symbol-mapping date and is still accepted and ignored.</td></tr>
+          <tr><td>adjustment</td><td><code>raw</code> (as-traded, never restated), <code>split</code>, <code>dividend</code>, or <code>all</code>. Defaults to <code>all</code> — Alpaca defaults to <code>raw</code>, and this is the one place we deviate, because it is observable only on the three tickers above.</td></tr>
+        </table>
+        <p class="small">
+          <code>GET /api/v1/corporate-actions?symbols=…</code> lists every action
+          with its <code>announce_date</code>, <code>ex_date</code> and
+          <code>process_date</code>. The gap between the last two is the point of
+          <code>DIVVY</code>: its adjustment lands five sessions after the ex-date,
+          well after a job that polls on the ex-date has decided the month is
+          settled. Requests for these tickers without an explicit
+          <code>as_of</code> are never marked immutably cacheable, for the obvious
+          reason.
+        </p>
+        <p class="small">
+          <b>Not seeing a change?</b> Every bar response carries
+          <code>X-Cuckoo-As-Of</code> and <code>X-Cuckoo-Restated</code> — read
+          them with <code>curl -i</code>. <code>2 actions applied (SPLITS split ex
+          2026-07-10; …)</code> means it worked; <code>0 actions applied</code>
+          means nothing rewrote these bars. The usual cause is a window sitting
+          <em>after</em> every ex-date, because an action only rewrites bars dated
+          before it — query June and move <code>as_of</code> across July, not the
+          other way round. Note also that omitting <code>start</code>/<code>end</code>
+          defaults to the last 30 days, which is almost always the wrong window for
+          this.
+        </p>
+        <p class="small">
+          Scope, stated plainly: this models the <em>restatement</em>, not the
+          ex-date price discontinuity — the split rewrites the history in front
+          of it, but you won't see the price halve on the ex-date itself.
+          Corporate actions older than six months count as already baked into
+          history.
+        </p>
+      </section>
+
+      <section id="faults">
+        <span class="eyebrow">CuckooTrade native</span>
+        <h2 class="mono">scenario= — fault injection</h2>
+        <p>
+          The scenario tickers break the <em>data</em>. This breaks the
+          <em>transport</em>: sockets that die mid-frame, bodies that arrive
+          half-written, requests that fail twice before they work. Add
+          <code>scenario=</code> to any request. Nothing here ever fires unless you
+          ask for it — and because every fault is deterministic, a test that
+          passes once passes every time, which is the whole reason these belong in
+          CI rather than in a chaos dashboard.
+        </p>
+        <table class="doc-table">
+          <tr><th>effect</th><th>where</th><th>what happens</th></tr>
+          <tr><td>flap:N</td><td>bars</td><td>fails N times, then succeeds — the one that tests your retry logic <em>recovers</em></td></tr>
+          <tr><td>status:CODE</td><td>bars</td><td>returns that status, in the error shape of whichever provider you called</td></tr>
+          <tr><td>slow:MS</td><td>both</td><td>delays the response, or each frame</td></tr>
+          <tr><td>truncate</td><td>both</td><td>full Content-Length, half a body; on the stream, one frame cut mid-JSON while the connection lives on</td></tr>
+          <tr><td>drop:S</td><td>stream</td><td>closes the socket at S seconds, mid-frame, with no close event</td></tr>
+          <tr><td>garbage:N</td><td>stream</td><td>N unparseable frames mixed in with the good ones</td></tr>
+          <tr><td>silent:S</td><td>stream</td><td>no data <em>and</em> no heartbeats for S seconds — finds read timeouts</td></tr>
+        </table>
+        <div class="panel" style="position:relative">
+          <button type="button" class="copy" style="position:absolute;top:10px;right:10px" data-copy-target="#faults-eg">copy</button>
+          <pre class="doc-pre" id="faults-eg"># fails twice, succeeds on the third attempt
+curl 'https://cuckootrade.com/api/v1/alpaca/v2/stocks/bars?symbols=AAPL&amp;timeframe=1Day&amp;scenario=flap:2'
+
+# the socket dies twenty seconds in
+curl -N 'https://cuckootrade.com/api/v1/stream?symbols=CUCKOO&amp;scenario=drop:20s'</pre>
+        </div>
+        <p class="small">
+          Faulted responses are always <code>Cache-Control: no-store</code> and echo
+          <code>X-Cuckoo-Scenario</code>. One caveat worth knowing:
+          <code>flap</code> has to count attempts, and that counter lives per pod —
+          across our replicas a <code>flap:2</code> can burn up to four failures
+          before it clears. If you need the count to be exact, run the container
+          yourself (see <a href="#self-host">self-hosting</a>).
+        </p>
       </section>
 
       <section id="limits">

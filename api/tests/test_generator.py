@@ -82,7 +82,7 @@ def coherence_check(symbol, day_str):
     assert day["v"] == sum(b["v"] for b in hours)
 
 
-@pytest.mark.parametrize("symbol", ["AAPL", "ZZZZ", "HALTS", "GAPPY", "PENNY"])
+@pytest.mark.parametrize("symbol", ["AAPL", "ZZZZ", "HALTS", "STALE", "GAPPY", "PENNY", "SPLITS", "DIVVY"])
 def test_cross_timeframe_coherence(symbol):
     coherence_check(symbol, "2026-07-06")
 

@@ -23,6 +23,7 @@ class Scenario:
     day_multiplier: Callable[[date], float] | None = None
     gap_override: Callable[[date, str], float] | None = None   # -> log gap
     halted_minutes: Callable[[date], frozenset[int]] | None = None
+    stale_minutes: Callable[[date], frozenset[int]] | None = None
     spike_minutes: Callable[[date], dict[int, float]] | None = None  # minute -> signed wick fraction
 
 
@@ -80,6 +81,23 @@ def _halts_windows(d: date) -> frozenset[int]:
     return frozenset(window)
 
 
+def _stale_windows(d: date) -> frozenset[int]:
+    """HALTS's evil twin. Where a halt deletes bars, a stuck feed keeps
+    emitting the last print it saw: the bars are all there, the timestamps
+    advance, and nothing moves.
+
+    Minute 389 is never stale, which is deliberate: the session always closes
+    on a real print, so the day's volume is never zero and the catch-up bar
+    that reconciles the frozen stretch always lands inside the same session.
+    """
+    key = f"scenario:STALE:{d.isoformat()}"
+    if hash_float(f"{key}:on") >= 0.75:
+        return frozenset()  # a clean session, for contrast
+    start = 20 + int(hash_float(f"{key}:start") * 300)
+    length = 15 + int(hash_float(f"{key}:len") * 30)
+    return frozenset(range(start, min(389, start + length)))
+
+
 def _spikey_minutes(d: date) -> dict[int, float]:
     key = f"scenario:SPIKEY:{d.isoformat()}"
     spikes: dict[int, float] = {}
@@ -115,9 +133,28 @@ SCENARIOS: dict[str, Scenario] = {
         personality=Personality(45.0, 0.30, 0.0, 6e6),
         halted_minutes=_halts_windows,
     ),
+    "STALE": Scenario(
+        personality=Personality(85.0, 0.28, 0.0, 7e6),
+        stale_minutes=_stale_windows,
+    ),
     "SPIKEY": Scenario(
         personality=Personality(150.0, 0.15, 0.0, 9e6),
         spike_minutes=_spikey_minutes,
+    ),
+    # Restatement tickers (engine/corporate_actions.py). Their signature is
+    # not a price shape at all -- it is that the same request answers
+    # differently once an action processes -- so they carry ordinary
+    # personalities and nothing else.
+    "SPLITS": Scenario(
+        personality=Personality(400.0, 0.22, 0.0, 11e6),
+    ),
+    "DIVVY": Scenario(
+        # Base price pinned to what corporate_actions quotes the cash dividend
+        # against, so the stated yield and the stated cash amount agree.
+        personality=Personality(120.0, 0.14, 0.0, 5e6),
+    ),
+    "REVISED": Scenario(
+        personality=Personality(55.0, 0.24, 0.0, 4e6),
     ),
     "PENNY": Scenario(
         personality=Personality(0.31, 0.85, 0.0, 15e6),

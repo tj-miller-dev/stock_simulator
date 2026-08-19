@@ -9,11 +9,24 @@ metadata:
     alb.ingress.kubernetes.io/target-type: ip
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
     alb.ingress.kubernetes.io/ssl-redirect: "443"
+    # The API only mounts /api/* -- it 404s on "/", which is the target group's
+    # default health check path, so without this every api target is marked
+    # unhealthy. The ALB then fails open (it routes to all targets when none are
+    # healthy), which is why this stayed invisible: traffic still flowed, but
+    # with no health gating at all and a 404 per check spamming the pod logs.
+    alb.ingress.kubernetes.io/healthcheck-path: /api/health
     # SSE streams heartbeat every 15s; the ALB default idle timeout of 60s
-    # would still kill a stalled stream mid-halt, so give it headroom. This is
-    # an ALB-level attribute -- declared once here, it applies to the whole
-    # shared "stock-simulator" ALB group.
-    alb.ingress.kubernetes.io/load-balancer-attributes: idle_timeout.timeout_seconds=120
+    # would still kill a stalled stream mid-halt, so give it headroom. These are
+    # ALB-level attributes -- declared once here, they apply to the whole
+    # shared "stock-simulator" ALB group (frontend traffic included).
+    #
+    # Access logs are the only durable record of who calls this service: pod
+    # stdout dies with the pod, and the API's own log can't see past the ALB.
+    # Bucket + policy are created by terraform/modules/loadbalancer/access_logs.tf;
+    # it must exist before this annotation is applied or the controller fails
+    # with "Access Denied for bucket". The account ID is baked in here because
+    # ArgoCD applies this file verbatim -- see QUICK_START if you change accounts.
+    alb.ingress.kubernetes.io/load-balancer-attributes: idle_timeout.timeout_seconds=120,access_logs.s3.enabled=true,access_logs.s3.bucket=stock-simulator-alb-logs-307946643562,access_logs.s3.prefix=alb
     # No certificate-arn annotation -- the controller auto-discovers the ACM
     # cert by matching this rule's `host` against ISSUED certs in the account,
     # so a fresh cert ARN after every destroy/apply still just works.

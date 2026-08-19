@@ -14,7 +14,8 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException
 
-from engine import GENERATION, bars_range, parse_timeframe
+from engine import (GENERATION, RESTATING_TICKERS, actions_applied_in, bars_range,
+                    parse_adjustment, parse_timeframe)
 
 PUBLIC_HOST = "https://cuckootrade.com"
 
@@ -99,6 +100,21 @@ def parse_common(timeframe, start, end, limit, seed, generation):
     return tf, start_dt, end_dt, (limit or BARS_DEFAULT_LIMIT), seed or ""
 
 
+def parse_history(as_of: str | None, adjustment: str | None):
+    """The two restatement knobs (V1_1_SPEC section 3), shared by every surface.
+
+    `as_of` is CuckooTrade's own and is deliberately spelled with the
+    underscore: Alpaca's `asof` is a symbol-mapping date and means something
+    else entirely, so conflating them would break the mimicry.
+    """
+    as_of_dt = parse_time(as_of, "as_of") if as_of else None
+    try:
+        mode = parse_adjustment(adjustment)
+    except ValueError as exc:
+        api_error(400, 40010001, f"{exc} -- working example: {EXAMPLE}")
+    return as_of_dt, mode
+
+
 def encode_token(symbol: str, last_t: str) -> str:
     return base64.urlsafe_b64encode(f"v1|{symbol}|{last_t}".encode()).decode()
 
@@ -117,7 +133,8 @@ def decode_token(token: str) -> tuple[str, str]:
         )
 
 
-def paginate_bars(symbols, tf, start_dt, end_dt, limit, seed, page_token, descending):
+def paginate_bars(symbols, tf, start_dt, end_dt, limit, seed, page_token, descending,
+                  as_of=None, adjustment="all"):
     """Alpaca pagination semantics: symbols alphabetically, `limit` counts
     total bars across symbols, next_page_token resumes exactly after the last
     bar served."""
@@ -128,10 +145,18 @@ def paginate_bars(symbols, tf, start_dt, end_dt, limit, seed, page_token, descen
     bars_by_symbol: dict[str, list] = {}
     budget = limit
     next_token = None
+    last_served: tuple[str, str] | None = None
     for symbol in symbols:
         if resume_symbol is not None and symbol < resume_symbol:
             bars_by_symbol[symbol] = []
             continue
+        if budget == 0:
+            # An earlier symbol consumed the budget exactly and symbols remain,
+            # so the page is full. Resume after the last bar actually served --
+            # tokenizing this untouched symbol instead would serve a page whose
+            # own token pointed at nothing.
+            next_token = encode_token(*last_served)
+            break
         sym_start, sym_end = start_dt, end_dt
         if symbol == resume_symbol and resume_t is not None:
             edge = parse_time(resume_t, "page_token") + (
@@ -145,6 +170,7 @@ def paginate_bars(symbols, tf, start_dt, end_dt, limit, seed, page_token, descen
         bars, truncated = bars_range(
             symbol, tf, sym_start, sym_end, seed=seed,
             max_bars=budget + 1, descending=descending,
+            as_of=as_of, adjustment=adjustment,
         )
         if len(bars) > budget:
             served = bars[:budget]
@@ -154,11 +180,72 @@ def paginate_bars(symbols, tf, start_dt, end_dt, limit, seed, page_token, descen
             break
         bars_by_symbol[symbol] = bars
         budget -= len(bars)
+        if bars:
+            last_served = (symbol, bars[-1]["t"])
     return bars_by_symbol, next_token
 
 
-def maybe_cache_forever(response, end_specified: bool, end_dt) -> None:
-    """History never changes here: a fully-specified window that ended in the
-    past is immutable, so say so and let any cache keep it forever."""
-    if end_specified and end_dt < datetime.now(timezone.utc) - timedelta(days=1):
-        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+MAX_RESTATED_LISTED = 4
+
+
+def mark_restatement(response, symbols, bars_by_symbol, as_of, adjustment) -> None:
+    """Say out loud what `as_of` actually did.
+
+    A restatement that changes nothing is indistinguishable from a broken one:
+    the response is a clean 200 full of plausible bars either way. That
+    ambiguity has cost real debugging time -- a window sitting in front of
+    every action, or a symbol that was never reserved, both look exactly like
+    the feature not working.
+
+    So every bar response states the as_of it answered at and how many actions
+    rewrote the bars it is handing back. Zero is the informative case. Headers
+    rather than body fields, because strict SDK parsers must never choke on
+    wire-compat routes (V1_SPEC 3.1).
+    """
+    effective = as_of or datetime.now(timezone.utc)
+    response.headers["X-Cuckoo-As-Of"] = effective.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    applied = []
+    for symbol in symbols:
+        bars = bars_by_symbol.get(symbol) or []
+        if not bars:
+            continue
+        first = datetime.fromisoformat(bars[0]["t"].replace("Z", "+00:00")).date()
+        last = datetime.fromisoformat(bars[-1]["t"].replace("Z", "+00:00")).date()
+        window = (min(first, last), max(first, last))  # sort=desc flips them
+        applied.extend(
+            actions_applied_in(symbol, *window, effective.date(), adjustment)
+        )
+
+    if not applied:
+        note = "0 actions applied"
+        if any(s in RESTATING_TICKERS for s in symbols):
+            # The symbol restates, this window just doesn't reach an action.
+            note += "; corporate actions rewrite bars dated before their ex_date"
+        response.headers["X-Cuckoo-Restated"] = note
+        return
+
+    applied.sort(key=lambda a: (a.ex_date, a.symbol))
+    listed = "; ".join(
+        f"{a.symbol} {a.kind} ex {a.ex_date}" for a in applied[:MAX_RESTATED_LISTED]
+    )
+    if len(applied) > MAX_RESTATED_LISTED:
+        listed += f"; +{len(applied) - MAX_RESTATED_LISTED} more"
+    response.headers["X-Cuckoo-Restated"] = f"{len(applied)} actions applied ({listed})"
+
+
+def maybe_cache_forever(response, end_specified: bool, end_dt, *, symbols=(),
+                        as_of=None) -> None:
+    """A fully-specified window that ended in the past is immutable *for a
+    fixed as_of*, so say so and let any cache keep it forever.
+
+    The restatement tickers are the exception that made this precise. Without
+    an explicit as_of, their past is exactly the thing that changes -- pinning
+    it in a CDN for a year would serve pre-split prices long after the split
+    (V1_1_SPEC section 3.4).
+    """
+    if not (end_specified and end_dt < datetime.now(timezone.utc) - timedelta(days=1)):
+        return
+    if as_of is None and any(s in RESTATING_TICKERS for s in symbols):
+        return
+    response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
