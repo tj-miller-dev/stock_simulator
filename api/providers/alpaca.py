@@ -50,6 +50,13 @@ INDEX_ENTRY = {
 }
 
 
+def fault_response(status: int, message: str) -> JSONResponse:
+    """An injected fault, wearing Alpaca's error shape (scenario= in effects.py)."""
+    return JSONResponse(
+        status_code=status, content={"code": status * 100000 + 10000, "message": message}
+    )
+
+
 @router.get("/v2/stocks/bars")
 def stock_bars(
     symbols: str,

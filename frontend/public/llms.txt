@@ -64,6 +64,12 @@ the same symbol+day returns identical OHLCV through every surface.
   STALE (feed freezes: price repeats, v=0, timestamps keep advancing),
   SPIKEY (one-minute wicks), PENNY (~$0.30, 4 decimals), CHOPPY (high vol,
   no drift).
+- Fault injection: add scenario= to break the transport on purpose. Nothing
+  fires without it, and every fault is deterministic (same spec, same failure).
+  Bars: flap:N (fail N times then succeed), status:CODE, slow:MS, truncate.
+  Stream: drop:S, garbage:N, silent:S, slow:MS, truncate. Faulted responses are
+  Cache-Control: no-store and echo X-Cuckoo-Scenario. flap counts per pod, so
+  across replicas expect up to N*replicas failures.
 - Errors: {"code": int, "message": str}; messages include the valid grammar
   and a working example URL. 429 = rate limited (60/min sustained per address,
   burst 120); honor RateLimit-Reset.

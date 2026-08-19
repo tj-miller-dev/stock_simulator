@@ -69,6 +69,20 @@ visible in any 30-day window:
 | `PENNY` | ~$0.30 prices with four decimals — flushes float bugs |
 | `CHOPPY` | high volatility, zero net drift |
 
+Scenario tickers break the data. `scenario=` breaks the transport — dropped
+sockets, half-written bodies, requests that fail twice before they work:
+
+```bash
+# fails twice, succeeds on the third attempt
+curl 'https://cuckootrade.com/api/v1/alpaca/v2/stocks/bars?symbols=AAPL&timeframe=1Day&scenario=flap:2'
+
+# the socket dies twenty seconds in, mid-frame, with no close event
+curl -N 'https://cuckootrade.com/api/v1/stream?symbols=CUCKOO&scenario=drop:20s'
+```
+
+Nothing fires unless you ask for it, and every fault is deterministic — which
+is the point. Random chaos makes flaky tests; these are meant to run in CI.
+
 There's also an SSE stream (`curl -N
 'https://cuckootrade.com/api/v1/stream?symbols=CUCKOO'`) with an always-open
 demo clock, a [playground](https://cuckootrade.com/playground), human

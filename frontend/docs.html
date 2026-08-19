@@ -59,6 +59,7 @@
         <a href="#determinism">determinism</a>
         <a href="#magic">scenario tickers</a>
         <a href="#stream">stream</a>
+        <a href="#faults">fault injection</a>
         <a href="#limits">rate limits</a>
         <a href="#self-host">self-hosting</a>
         <a href="#disclaimer">disclaimer</a>
@@ -266,6 +267,46 @@
           <button type="button" class="copy" style="position:absolute;top:10px;right:10px" data-copy-target="#sse">copy</button>
           <pre class="doc-pre" id="sse">curl -N 'https://cuckootrade.com/api/v1/stream?symbols=CUCKOO,CRASH'</pre>
         </div>
+      </section>
+
+      <section id="faults">
+        <span class="eyebrow">CuckooTrade native</span>
+        <h2 class="mono">scenario= — fault injection</h2>
+        <p>
+          The scenario tickers break the <em>data</em>. This breaks the
+          <em>transport</em>: sockets that die mid-frame, bodies that arrive
+          half-written, requests that fail twice before they work. Add
+          <code>scenario=</code> to any request. Nothing here ever fires unless you
+          ask for it — and because every fault is deterministic, a test that
+          passes once passes every time, which is the whole reason these belong in
+          CI rather than in a chaos dashboard.
+        </p>
+        <table class="doc-table">
+          <tr><th>effect</th><th>where</th><th>what happens</th></tr>
+          <tr><td>flap:N</td><td>bars</td><td>fails N times, then succeeds — the one that tests your retry logic <em>recovers</em></td></tr>
+          <tr><td>status:CODE</td><td>bars</td><td>returns that status, in the error shape of whichever provider you called</td></tr>
+          <tr><td>slow:MS</td><td>both</td><td>delays the response, or each frame</td></tr>
+          <tr><td>truncate</td><td>both</td><td>full Content-Length, half a body; on the stream, one frame cut mid-JSON while the connection lives on</td></tr>
+          <tr><td>drop:S</td><td>stream</td><td>closes the socket at S seconds, mid-frame, with no close event</td></tr>
+          <tr><td>garbage:N</td><td>stream</td><td>N unparseable frames mixed in with the good ones</td></tr>
+          <tr><td>silent:S</td><td>stream</td><td>no data <em>and</em> no heartbeats for S seconds — finds read timeouts</td></tr>
+        </table>
+        <div class="panel" style="position:relative">
+          <button type="button" class="copy" style="position:absolute;top:10px;right:10px" data-copy-target="#faults-eg">copy</button>
+          <pre class="doc-pre" id="faults-eg"># fails twice, succeeds on the third attempt
+curl 'https://cuckootrade.com/api/v1/alpaca/v2/stocks/bars?symbols=AAPL&amp;timeframe=1Day&amp;scenario=flap:2'
+
+# the socket dies twenty seconds in
+curl -N 'https://cuckootrade.com/api/v1/stream?symbols=CUCKOO&amp;scenario=drop:20s'</pre>
+        </div>
+        <p class="small">
+          Faulted responses are always <code>Cache-Control: no-store</code> and echo
+          <code>X-Cuckoo-Scenario</code>. One caveat worth knowing:
+          <code>flap</code> has to count attempts, and that counter lives per pod —
+          across our replicas a <code>flap:2</code> can burn up to four failures
+          before it clears. If you need the count to be exact, run the container
+          yourself (see <a href="#self-host">self-hosting</a>).
+        </p>
       </section>
 
       <section id="limits">

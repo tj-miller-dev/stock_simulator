@@ -103,7 +103,7 @@ symbol was requested while keeping that symbol's own price level.
 | `flap:<n>` | HTTP | fail n times, then succeed | **retry/backoff — the one that passes** |
 | `status:<code>` | HTTP | that provider's error shape, at that status | error paths |
 | `slow:<ms>` | both | delay the response / the next frame | client timeouts |
-| `truncate` | both | cut the body or an SSE frame mid-JSON, then close | partial-body parsing |
+| `truncate` | both | HTTP: honest `Content-Length`, half a body, then close. Stream: one frame cut mid-JSON with the connection left up, so the client has to resync rather than reconnect — the harder path to get right | partial-body parsing |
 | `drop:<s>` | stream | close the socket at T+s, mid-frame, no close event | reconnect logic |
 | `garbage:<n>` | stream | n invalid `data:` payloads among the good ones | parse-error handling |
 | `silent:<s>` | stream | stop data *and* heartbeats for s | read timeouts |

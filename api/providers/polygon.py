@@ -69,6 +69,11 @@ def _error(status: int, rid: str, message: str) -> JSONResponse:
     )
 
 
+def fault_response(status: int, message: str) -> JSONResponse:
+    """An injected fault, wearing Polygon's error shape."""
+    return _error(status, _request_id("fault", status, message), message)
+
+
 def _timeframe(multiplier: int, timespan: str) -> Timeframe | str:
     """Polygon's (multiplier, timespan) grammar onto the engine's. Returns a
     Timeframe or an error string listing what this mimic supports."""
