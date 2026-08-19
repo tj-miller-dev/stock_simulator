@@ -187,3 +187,67 @@ def test_bad_adjustment_teaches():
     r = client.get(BARS + "&adjustment=sideways")
     assert r.status_code == 400
     assert "raw, split, dividend or all" in r.json()["message"]
+
+
+# --- saying out loud what as_of did ---------------------------------------
+#
+# Both of these reproduce a real debugging session: a restatement that changed
+# nothing looked exactly like a broken feature, because the response is a clean
+# 200 full of plausible bars either way.
+
+
+def test_restated_header_names_the_actions_that_applied():
+    r = client.get(BARS + "&as_of=2026-07-13")
+    assert r.headers["X-Cuckoo-As-Of"].startswith("2026-07-13")
+    restated = r.headers["X-Cuckoo-Restated"]
+    assert restated.startswith("2 actions applied")
+    assert "SPLITS split ex 2026-06-10" in restated
+    assert "SPLITS split ex 2026-07-10" in restated
+
+
+def test_window_in_front_of_every_action_reports_zero():
+    """The wrong-window mistake: August bars sit after every ex-date, so no
+    action can rewrite them and as_of appears to do nothing."""
+    august = ("/api/v1/alpaca/v2/stocks/bars?symbols=SPLITS&timeframe=1Day"
+              "&start=2026-08-11&end=2026-08-18")
+    r = client.get(august + "&as_of=2026-08-19")
+    assert r.headers["X-Cuckoo-Restated"].startswith("0 actions applied")
+    assert "before their ex_date" in r.headers["X-Cuckoo-Restated"]
+
+
+def test_unreserved_symbol_reports_zero_without_the_hint():
+    """The typo mistake: SPLIT is not SPLITS, so it falls through to an
+    ordinary hash-derived personality and quietly never restates."""
+    r = client.get(BARS.replace("symbols=SPLITS", "symbols=SPLIT") + "&as_of=2026-07-13")
+    assert r.headers["X-Cuckoo-Restated"] == "0 actions applied"
+
+
+def test_adjustment_raw_reports_zero():
+    r = client.get(BARS + "&as_of=2026-07-13&adjustment=raw")
+    assert r.headers["X-Cuckoo-Restated"].startswith("0 actions applied")
+
+
+def test_pending_late_dividend_is_not_counted_as_applied():
+    """DIVVY's June dividend goes ex on the 22nd and processes on the 29th.
+    In between it is known but has changed nothing, and the header must say so
+    rather than implying the adjustment already landed."""
+    divvy = ("/api/v1/alpaca/v2/stocks/bars?symbols=DIVVY&timeframe=1Day"
+             "&start=2026-06-01&end=2026-06-05")
+    assert client.get(divvy + "&as_of=2026-06-26").headers[
+        "X-Cuckoo-Restated"].startswith("0 actions applied")
+    assert client.get(divvy + "&as_of=2026-06-30").headers[
+        "X-Cuckoo-Restated"].startswith("1 actions applied")
+
+
+def test_latest_bars_carry_the_headers_too():
+    r = client.get("/api/v1/alpaca/v2/stocks/bars/latest?symbols=SPLITS")
+    assert r.status_code == 200 and "bars" in r.json()
+    assert "X-Cuckoo-As-Of" in r.headers and "X-Cuckoo-Restated" in r.headers
+
+
+def test_index_lists_every_reserved_ticker():
+    """The root cause of the typo: the one machine-readable list of special
+    symbols was missing three of them."""
+    magic = client.get("/api").json()["magic_tickers"]
+    for ticker in ("SPLITS", "DIVVY", "REVISED", "STALE", "CRASH"):
+        assert ticker in magic, f"{ticker} missing from the /api index"

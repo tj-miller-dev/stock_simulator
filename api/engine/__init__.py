@@ -19,6 +19,7 @@ from .generator import (
 from .corporate_actions import (
     RESTATING_TICKERS,
     actions_for,
+    applied_in as actions_applied_in,
     in_window as actions_in_window,
     parse_adjustment,
 )
@@ -41,6 +42,7 @@ __all__ = [
     "SCENARIO_TICKERS",
     "RESTATING_TICKERS",
     "actions_for",
+    "actions_applied_in",
     "actions_in_window",
     "parse_adjustment",
 ]

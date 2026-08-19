@@ -174,6 +174,46 @@ def in_window(symbol: str, start: date, end: date, as_of: date) -> list[Action]:
     return [a for a in actions_for(symbol, as_of) if start <= a.ex_date <= end]
 
 
+# Which adjustment modes select which kind of action. A busted trade is a
+# vendor correction rather than a corporate action, so it is not something a
+# caller can ask to be left out of -- only adjustment=raw escapes it.
+_WANTED_BY = {
+    "split": ("split", "all"),
+    "dividend": ("dividend", "all"),
+    "correction": ("split", "dividend", "all", "correction"),
+}
+
+
+def applied_in(symbol: str, start: date, end: date, as_of: date,
+               adjustment: str) -> list[Action]:
+    """The actions that actually rewrote bars in [start, end] at this `as_of`.
+
+    This is the number behind the X-Cuckoo-Restated header, and it answers the
+    only question anyone has when a restatement appears not to work: did my
+    as_of change anything at all? Zero is the useful answer -- it means the
+    window sits in front of every action, which is the mistake that looks
+    exactly like a broken feature.
+    """
+    if adjustment == "raw" or symbol not in RESTATING_TICKERS:
+        return []
+    found = []
+    for action in actions_for(symbol, as_of):
+        if adjustment not in _WANTED_BY[action.kind]:
+            continue
+        # Known, but not currently moving anything: a dividend whose late
+        # adjustment has not landed yet reads as zero, which is the truth.
+        if action.factor(as_of) == 1.0:
+            continue
+        if action.kind == "correction":
+            if start <= action.ex_date <= end:
+                found.append(action)
+        elif start < action.ex_date:
+            # A split rewrites what came *before* it, so it bites this window
+            # only if some of the window precedes the ex-date.
+            found.append(action)
+    return found
+
+
 def factors_for(symbol: str, as_of: date, adjustment: str):
     """A callable day -> (price_factor, volume_factor), or None when there is
     nothing to adjust.
@@ -184,15 +224,8 @@ def factors_for(symbol: str, as_of: date, adjustment: str):
     """
     if adjustment == "raw" or symbol not in RESTATING_TICKERS:
         return None
-    wanted = {
-        "split": ("split", "all"),
-        "dividend": ("dividend", "all"),
-        # A busted trade is a vendor correction, not a corporate action; it is
-        # not something you can ask to be left out of.
-        "correction": ("split", "dividend", "all", "correction"),
-    }
     applicable = [
-        a for a in actions_for(symbol, as_of) if adjustment in wanted[a.kind]
+        a for a in actions_for(symbol, as_of) if adjustment in _WANTED_BY[a.kind]
     ]
     if not applicable:
         return None

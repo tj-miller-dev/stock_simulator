@@ -14,8 +14,8 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException
 
-from engine import (GENERATION, RESTATING_TICKERS, bars_range, parse_adjustment,
-                    parse_timeframe)
+from engine import (GENERATION, RESTATING_TICKERS, actions_applied_in, bars_range,
+                    parse_adjustment, parse_timeframe)
 
 PUBLIC_HOST = "https://cuckootrade.com"
 
@@ -173,6 +173,55 @@ def paginate_bars(symbols, tf, start_dt, end_dt, limit, seed, page_token, descen
         bars_by_symbol[symbol] = bars
         budget -= len(bars)
     return bars_by_symbol, next_token
+
+
+MAX_RESTATED_LISTED = 4
+
+
+def mark_restatement(response, symbols, bars_by_symbol, as_of, adjustment) -> None:
+    """Say out loud what `as_of` actually did.
+
+    A restatement that changes nothing is indistinguishable from a broken one:
+    the response is a clean 200 full of plausible bars either way. That
+    ambiguity has cost real debugging time -- a window sitting in front of
+    every action, or a symbol that was never reserved, both look exactly like
+    the feature not working.
+
+    So every bar response states the as_of it answered at and how many actions
+    rewrote the bars it is handing back. Zero is the informative case. Headers
+    rather than body fields, because strict SDK parsers must never choke on
+    wire-compat routes (V1_SPEC 3.1).
+    """
+    effective = as_of or datetime.now(timezone.utc)
+    response.headers["X-Cuckoo-As-Of"] = effective.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    applied = []
+    for symbol in symbols:
+        bars = bars_by_symbol.get(symbol) or []
+        if not bars:
+            continue
+        first = datetime.fromisoformat(bars[0]["t"].replace("Z", "+00:00")).date()
+        last = datetime.fromisoformat(bars[-1]["t"].replace("Z", "+00:00")).date()
+        window = (min(first, last), max(first, last))  # sort=desc flips them
+        applied.extend(
+            actions_applied_in(symbol, *window, effective.date(), adjustment)
+        )
+
+    if not applied:
+        note = "0 actions applied"
+        if any(s in RESTATING_TICKERS for s in symbols):
+            # The symbol restates, this window just doesn't reach an action.
+            note += "; corporate actions rewrite bars dated before their ex_date"
+        response.headers["X-Cuckoo-Restated"] = note
+        return
+
+    applied.sort(key=lambda a: (a.ex_date, a.symbol))
+    listed = "; ".join(
+        f"{a.symbol} {a.kind} ex {a.ex_date}" for a in applied[:MAX_RESTATED_LISTED]
+    )
+    if len(applied) > MAX_RESTATED_LISTED:
+        listed += f"; +{len(applied) - MAX_RESTATED_LISTED} more"
+    response.headers["X-Cuckoo-Restated"] = f"{len(applied)} actions applied ({listed})"
 
 
 def maybe_cache_forever(response, end_specified: bool, end_dt, *, symbols=(),

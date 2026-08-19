@@ -320,6 +320,18 @@ curl 'https://cuckootrade.com/api/v1/corporate-actions?symbols=SPLITS,DIVVY'</pr
           reason.
         </p>
         <p class="small">
+          <b>Not seeing a change?</b> Every bar response carries
+          <code>X-Cuckoo-As-Of</code> and <code>X-Cuckoo-Restated</code> — read
+          them with <code>curl -i</code>. <code>2 actions applied (SPLITS split ex
+          2026-07-10; …)</code> means it worked; <code>0 actions applied</code>
+          means nothing rewrote these bars. The usual cause is a window sitting
+          <em>after</em> every ex-date, because an action only rewrites bars dated
+          before it — query June and move <code>as_of</code> across July, not the
+          other way round. Note also that omitting <code>start</code>/<code>end</code>
+          defaults to the last 30 days, which is almost always the wrong window for
+          this.
+        </p>
+        <p class="small">
           Scope, stated plainly: this models the <em>restatement</em>, not the
           ex-date price discontinuity — the split rewrites the history in front
           of it, but you won't see the price halve on the ex-date itself.

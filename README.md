@@ -88,6 +88,10 @@ curl 'https://cuckootrade.com/api/v1/corporate-actions?symbols=SPLITS,DIVVY'
 If you keep bars in a database, that's the scenario your reconciliation job is
 supposed to catch — and now you can test it without waiting a month.
 
+Use `curl -i`: every bar response reports `X-Cuckoo-Restated: 2 actions applied
+(…)`, or `0 actions applied` when nothing rewrote those bars. An action only
+rewrites bars dated *before* its ex-date, so query a window that sits behind it.
+
 Scenario tickers break the data. `scenario=` breaks the transport — dropped
 sockets, half-written bodies, requests that fail twice before they work:
 

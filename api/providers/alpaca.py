@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from common import (
     EXAMPLE,
     api_error,
+    mark_restatement,
     maybe_cache_forever,
     parse_common,
     parse_history,
@@ -100,6 +101,7 @@ def stock_bars(
         as_of=as_of_dt, adjustment=adjust,
     )
     response = JSONResponse({"bars": bars, "next_page_token": next_token})
+    mark_restatement(response, symbol_list, bars, as_of_dt, adjust)
     maybe_cache_forever(response, bool(end), end_dt, symbols=symbol_list, as_of=as_of_dt)
     return response
 
@@ -116,14 +118,18 @@ def stock_bars_latest(
     symbol_list = parse_symbols(symbols)
     tf, _, _, _, seed = parse_common(timeframe, None, None, None, seed, generation)
     as_of_dt, adjust = parse_history(as_of, adjustment)
-    return {
-        "bars": {
-            s: bar
-            for s in symbol_list
-            if (bar := latest_bar(s, tf, seed=seed, as_of=as_of_dt, adjustment=adjust))
-            is not None
-        }
+    bars = {
+        s: bar
+        for s in symbol_list
+        if (bar := latest_bar(s, tf, seed=seed, as_of=as_of_dt, adjustment=adjust))
+        is not None
     }
+    response = JSONResponse({"bars": bars})
+    # One bar per symbol, so the window each action is measured against is
+    # that single bar.
+    mark_restatement(response, symbol_list, {k: [v] for k, v in bars.items()},
+                     as_of_dt, adjust)
+    return response
 
 
 @router.get("/v2/stocks/{symbol}/bars")
@@ -157,5 +163,6 @@ def stock_bars_single(
     response = JSONResponse(
         {"bars": bars[sym], "symbol": sym, "next_page_token": next_token}
     )
+    mark_restatement(response, [sym], bars, as_of_dt, adjust)
     maybe_cache_forever(response, bool(end), end_dt, symbols=[sym], as_of=as_of_dt)
     return response

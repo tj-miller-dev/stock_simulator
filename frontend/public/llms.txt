@@ -71,7 +71,11 @@ the same symbol+day returns identical OHLCV through every surface.
   answer as of today. adjustment=raw|split|dividend|all, default all (Alpaca
   defaults to raw; only these three tickers are affected).
   GET /api/v1/corporate-actions?symbols=SPLITS,DIVVY lists announce/ex/process
-  dates. Requests without as_of on those tickers are never cached immutable.
+  dates. Bar responses carry X-Cuckoo-As-Of and X-Cuckoo-Restated ("N actions
+  applied (...)"); "0 actions applied" means nothing rewrote these bars --
+  usually a window after every ex-date, since actions only rewrite bars dated
+  BEFORE their ex_date. Omitting start/end defaults to the last 30 days, which
+  is the wrong window for seeing a restatement. Requests without as_of on those tickers are never cached immutable.
 - Fault injection: add scenario= to break the transport on purpose. Nothing
   fires without it, and every fault is deterministic (same spec, same failure).
   Bars: flap:N (fail N times then succeed), status:CODE, slow:MS, truncate.

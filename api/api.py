@@ -287,6 +287,13 @@ def index():
             "adjustment": "raw | split | dividend | all (default all -- unlike "
             "Alpaca's raw, and observable only on the tickers above)",
             "ledger": ACTIONS_PATH,
+            "how_to_tell_it_worked": (
+                "Every bar response carries X-Cuckoo-As-Of and X-Cuckoo-Restated "
+                "(e.g. '2 actions applied (SPLITS split ex 2026-07-10; ...)'). "
+                "'0 actions applied' means nothing rewrote these bars -- usually "
+                "the window sits after every ex-date, since an action only "
+                "rewrites bars dated before it."
+            ),
             "example": "/api/v1/alpaca/v2/stocks/bars?symbols=SPLITS"
             "&timeframe=1Day&start=2026-06-01&end=2026-06-30&as_of=2026-07-09",
         },
@@ -305,6 +312,12 @@ def index():
             "SPIKEY": "single-minute fat-finger wicks",
             "PENNY": "sub-dollar prices, high volatility",
             "CHOPPY": "high volatility, zero net drift",
+            "SPLITS": "2:1 forward split monthly; prior closes restate -- see "
+            "`restatement` below",
+            "DIVVY": "monthly dividend whose ~1.5% adjustment lands five sessions "
+            "late -- see `restatement` below",
+            "REVISED": "a bad print history carries until the exchange busts it -- "
+            "see `restatement` below",
         },
         "fault_injection": {
             "param": "scenario",
