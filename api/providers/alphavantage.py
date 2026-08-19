@@ -13,8 +13,10 @@ and sessions are RTH-only (no extended hours).
 """
 
 from datetime import date, datetime, timedelta, timezone
+from typing import Annotated
 
-from fastapi import APIRouter
+import apidocs
+from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 
 from common import SYMBOL_RE
@@ -44,6 +46,151 @@ INDEX_ENTRY = {
         },
     ],
 }
+
+
+AV_DOCS = ("Alpha Vantage's own documentation",
+           "https://www.alphavantage.co/documentation/")
+
+FUNCTIONS = (
+    "TIME_SERIES_INTRADAY", "TIME_SERIES_DAILY", "TIME_SERIES_WEEKLY",
+    "TIME_SERIES_MONTHLY", "GLOBAL_QUOTE",
+)
+
+# Alpha Vantage puts the endpoint selector in a query parameter, so `function`
+# does the work a path would elsewhere. It gets the fullest documentation here
+# for that reason: pick the wrong one and nothing else on this page applies.
+FunctionQ = Annotated[
+    str | None,
+    Query(
+        description=(
+            "Which series to return. Alpha Vantage has one path and switches on this "
+            "parameter, so it decides which of the response shapes below you get -- "
+            "and which other parameters mean anything.\n\n"
+            "- `TIME_SERIES_INTRADAY` -- requires `interval`; honours `month` and "
+            "`outputsize`\n"
+            "- `TIME_SERIES_DAILY` -- honours `outputsize` (~100 bars compact, ~20 "
+            "years full)\n"
+            "- `TIME_SERIES_WEEKLY` / `TIME_SERIES_MONTHLY` -- always ~20 years; "
+            "`outputsize` is inert\n"
+            "- `GLOBAL_QUOTE` -- a single latest-quote object, not a series"
+        ),
+        json_schema_extra={"enum": list(FUNCTIONS)},
+        openapi_examples={
+            "daily": {"summary": "Daily bars", "value": "TIME_SERIES_DAILY"},
+            "intraday": {
+                "summary": "Intraday bars",
+                "description": "Requires `interval`, e.g. `interval=5min`.",
+                "value": "TIME_SERIES_INTRADAY",
+            },
+            "weekly": {"summary": "Weekly bars", "value": "TIME_SERIES_WEEKLY"},
+            "quote": {
+                "summary": "Latest quote",
+                "description": "A different shape entirely -- one object, zero-padded keys.",
+                "value": "GLOBAL_QUOTE",
+            },
+        },
+    ),
+]
+
+AvSymbolQ = Annotated[
+    str | None,
+    Query(
+        description=(
+            "One symbol -- this API takes no comma lists. Letters, digits, dot and "
+            "dash, 12 characters max, case-insensitive. Any well-formed symbol "
+            "returns data; the scenario tickers are the ones with scripted behavior."
+        ),
+        openapi_examples={
+            "ordinary": {"summary": "An ordinary symbol", "value": "IBM"},
+            "scenario": {
+                "summary": "A scenario ticker",
+                "description": "Zero-range bars: open, high, low and close all equal.",
+                "value": "FLAT",
+            },
+        },
+    ),
+]
+
+IntervalQ = Annotated[
+    str | None,
+    Query(
+        description=(
+            "Bar size for `TIME_SERIES_INTRADAY`, where it is **required**. Ignored "
+            "by every other function."
+        ),
+        json_schema_extra={"enum": list(INTERVALS)},
+    ),
+]
+
+OutputSizeQ = Annotated[
+    str,
+    Query(
+        description=(
+            f"`compact` returns the latest {COMPACT_POINTS} points; `full` returns "
+            f"the trailing {FULL_YEARS} years (or 30 days for intraday). Inert for "
+            "weekly, monthly and `GLOBAL_QUOTE`, which have a fixed size."
+        ),
+        json_schema_extra={"enum": ["compact", "full"]},
+    ),
+]
+
+MonthQ = Annotated[
+    str | None,
+    Query(
+        description=(
+            "Restrict `TIME_SERIES_INTRADAY` to one calendar month, `YYYY-MM`. Takes "
+            "precedence over `outputsize`, and is the way to reach intraday history "
+            "older than 30 days."
+        ),
+        openapi_examples={"month": {"summary": "One month", "value": "2026-07"}},
+    ),
+]
+
+DatatypeQ = Annotated[
+    str,
+    Query(
+        description=(
+            "Only `json` is implemented. `datatype=csv` returns an `Error Message` "
+            "rather than pretending -- the real API supports it, this mimic does not "
+            "yet."
+        ),
+        json_schema_extra={"enum": ["json"]},
+    ),
+]
+
+ApiKeyQ = Annotated[
+    str | None,
+    Query(
+        description=(
+            "Accepted and ignored -- CuckooTrade is keyless. Present so a client "
+            "already configured with a real key works unchanged. `demo` works too, "
+            "as does anything else."
+        ),
+    ),
+]
+
+AdjustedQ = Annotated[
+    str | None,
+    Query(
+        description=(
+            "Accepted and ignored: this surface serves as-traded prices and does not "
+            "restate. Corporate actions live on the Alpaca surface, behind `as_of`."
+        ),
+    ),
+]
+
+ExtendedHoursQ = Annotated[
+    str | None,
+    Query(
+        description=(
+            "Accepted and ignored: sessions here are regular hours only "
+            "(09:30-16:00 ET), so there is no extended-hours data to include or omit."
+        ),
+    ),
+]
+
+AvSeedQ = Annotated[str | None, Query(description=apidocs.SEED_TEXT)]
+AvGenerationQ = Annotated[int, Query(description=apidocs.GENERATION_TEXT)]
 
 
 def _error(message: str) -> JSONResponse:
@@ -103,20 +250,157 @@ def _output_size(outputsize: str) -> str:
     return "Full size" if outputsize == "full" else "Compact"
 
 
-@router.get("/query")
+_AV_EXAMPLES = {
+    "daily": apidocs.example(
+        "TIME_SERIES_DAILY",
+        {
+            "Meta Data": {
+                "1. Information": "Daily Prices (open, high, low, close) and Volumes",
+                "2. Symbol": "IBM",
+                "3. Last Refreshed": "2026-08-18",
+                "4. Output Size": "Compact",
+                "5. Time Zone": "US/Eastern",
+            },
+            "Time Series (Daily)": {
+                "2026-08-18": {"1. open": "169.9900", "2. high": "173.5800",
+                               "3. low": "169.9000", "4. close": "172.5600",
+                               "5. volume": "3416035"},
+                "2026-08-17": {"1. open": "173.6900", "2. high": "175.1400",
+                               "3. low": "170.1300", "4. close": "170.1900",
+                               "5. volume": "3669152"},
+            },
+        },
+        "Every number is a **string**, keys are numbered, and the series is a map "
+        "keyed newest-first rather than an array. All three are Alpha Vantage's "
+        "real conventions, reproduced exactly.",
+    ),
+    "intraday": apidocs.example(
+        "TIME_SERIES_INTRADAY",
+        {
+            "Meta Data": {
+                "1. Information": "Intraday (5min) open, high, low, close prices and volume",
+                "2. Symbol": "IBM",
+                "3. Last Refreshed": "2026-08-18 16:00:00",
+                "4. Interval": "5min",
+                "5. Output Size": "Compact",
+                "6. Time Zone": "US/Eastern",
+            },
+            "Time Series (5min)": {
+                "2026-08-18 16:00:00": {"1. open": "172.4100", "2. high": "172.6200",
+                                        "3. low": "172.3300", "4. close": "172.5600",
+                                        "5. volume": "48219"},
+            },
+        },
+        "Intraday labels are the bar's **close** in US/Eastern local time, not its "
+        "open in UTC -- the opposite convention to the Alpaca surface. The meta "
+        "block gains a `4. Interval` field, shifting Time Zone to `6.`.",
+    ),
+    "quote": apidocs.example(
+        "GLOBAL_QUOTE",
+        {"Global Quote": {
+            "01. symbol": "IBM", "02. open": "169.9900", "03. high": "173.5800",
+            "04. low": "169.9000", "05. price": "172.5600", "06. volume": "3416035",
+            "07. latest trading day": "2026-08-18", "08. previous close": "170.1900",
+            "09. change": "2.3700", "10. change percent": "1.3926%"}},
+        "A different shape entirely: one object, zero-padded keys, and "
+        "`10. change percent` carrying a literal `%` inside the string.",
+    ),
+    "error": apidocs.example(
+        "An error -- still HTTP 200",
+        {"Error Message":
+         "Invalid API call. This synthetic mimic supports function="
+         "TIME_SERIES_INTRADAY, TIME_SERIES_DAILY, TIME_SERIES_WEEKLY, "
+         "TIME_SERIES_MONTHLY, or GLOBAL_QUOTE. Working example: " + AV_EXAMPLE},
+        "**This is the important one.** Alpha Vantage reports failures with a 200 "
+        "and an `Error Message` key, and so does this. Check for the key; the "
+        "status code will not tell you.",
+    ),
+}
+
+
+@router.get(
+    "/query",
+    summary="Time series and quotes (function-switched)",
+    operation_id="alphavantage_query",
+    response_description="The shape selected by `function` -- or an `Error Message`, also with status 200.",
+    responses={
+        200: apidocs.response(
+            "**Success and failure both arrive as 200.** A body carrying an "
+            "`Error Message` key is a failure however healthy the status line "
+            "looks; anything else is one of the series shapes below, chosen by "
+            "`function`.",
+            schema={
+                "oneOf": [
+                    apidocs.ref("AlphaVantageSeries"),
+                    apidocs.ref("AlphaVantageQuote"),
+                    apidocs.ref("AlphaVantageError"),
+                ]
+            },
+            examples=_AV_EXAMPLES,
+        ),
+    },
+    openapi_extra=apidocs.extras(
+        mimics=AV_DOCS,
+        samples=(
+            (
+                "Shell",
+                "curl",
+                'curl "https://cuckootrade.com/api/v1/alphavantage/query'
+                '?function=TIME_SERIES_DAILY&symbol=IBM"',
+            ),
+            (
+                "Python",
+                "requests",
+                "import requests\n\n"
+                'r = requests.get("https://cuckootrade.com/api/v1/alphavantage/query",\n'
+                '                 params={"function": "TIME_SERIES_DAILY",\n'
+                '                         "symbol": "IBM"}).json()\n\n'
+                "# Check the key, not the status code -- errors arrive as 200.\n"
+                'if "Error Message" in r:\n'
+                '    raise SystemExit(r["Error Message"])\n\n'
+                'series = r["Time Series (Daily)"]\n'
+                'for day, ohlcv in list(series.items())[:5]:      # newest first\n'
+                '    print(day, float(ohlcv["4. close"]))         # values are strings',
+            ),
+        ),
+    ),
+)
 def query(
-    function: str | None = None,
-    symbol: str | None = None,
-    interval: str | None = None,
-    outputsize: str = "compact",
-    month: str | None = None,
-    datatype: str = "json",
-    apikey: str | None = None,          # accepted, ignored: keyless by design
-    adjusted: str | None = None,        # accepted, ignored: no corporate actions
-    extended_hours: str | None = None,  # accepted, ignored: RTH only
-    seed: str | None = None,            # Cuckoo extension: alternate dataset
-    generation: int = GENERATION,       # Cuckoo extension: pin generator version
+    function: FunctionQ = None,
+    symbol: AvSymbolQ = None,
+    interval: IntervalQ = None,
+    outputsize: OutputSizeQ = "compact",
+    month: MonthQ = None,
+    datatype: DatatypeQ = "json",
+    apikey: ApiKeyQ = None,              # accepted, ignored: keyless by design
+    adjusted: AdjustedQ = None,          # accepted, ignored: no corporate actions
+    extended_hours: ExtendedHoursQ = None,  # accepted, ignored: RTH only
+    seed: AvSeedQ = None,                # Cuckoo extension: alternate dataset
+    generation: AvGenerationQ = GENERATION,  # Cuckoo extension: pin generator version
 ):
+    """Alpha Vantage's single `query` endpoint, switched by `function`.
+
+    **Errors come back as HTTP 200.** That is not a bug here: the real API does
+    it, and its client libraries sniff for the `Error Message` key rather than
+    checking the status. Any code pointed at this surface must do the same. The
+    one exception is `scenario=status:CODE`, where you have explicitly asked for
+    a status to test against and that wins over the mimicry.
+
+    **Everything is a string.** Prices and volumes are quoted, keys are numbered
+    (`"1. open"`, `"5. volume"`), and series are maps keyed newest-first rather
+    than arrays. Parsers that assume JSON numbers break here, which is a large
+    part of why this surface is worth testing against.
+
+    **Labelling differs per function.** Daily rows are keyed `YYYY-MM-DD`; weekly
+    and monthly rows are keyed by the *last trading day* of the period; intraday
+    rows are keyed by the bar's **close** in US/Eastern local time -- the
+    opposite convention to the Alpaca surface's UTC open timestamps.
+
+    **Deviations:** only completed bars are served, so there is no partial
+    current day/week/month row (determinism requires it); sessions are regular
+    hours only, so `adjusted` and `extended_hours` are inert; `apikey` is
+    accepted and ignored; and `datatype=csv` is not implemented.
+    """
     if generation != GENERATION:
         return _error(
             f"unknown generation {generation}: this deployment serves generation "
@@ -129,10 +413,7 @@ def query(
             "datatype=csv is not supported by this synthetic mimic yet; omit the "
             "parameter or pass datatype=json."
         )
-    if function not in (
-        "TIME_SERIES_INTRADAY", "TIME_SERIES_DAILY", "TIME_SERIES_WEEKLY",
-        "TIME_SERIES_MONTHLY", "GLOBAL_QUOTE",
-    ):
+    if function not in FUNCTIONS:
         return _error(
             f"Invalid API call. This synthetic mimic supports function="
             f"TIME_SERIES_INTRADAY, TIME_SERIES_DAILY, TIME_SERIES_WEEKLY, "

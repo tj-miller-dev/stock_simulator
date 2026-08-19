@@ -26,7 +26,10 @@ import time
 from collections import Counter
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Request
+from typing import Annotated
+
+import apidocs
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import StreamingResponse
 
 from effects import EffectError, has, parse_scenario, value_of
@@ -138,9 +141,209 @@ async def _with_faults(events, effects):
         yield chunk
 
 
-@router.get(STREAM_PATH)
-async def sse_stream(request: Request, symbols: str = "CUCKOO", clock: str = "demo",
-                     seed: str = "", scenario: str = ""):
+StreamSymbolsQ = Annotated[
+    str,
+    Query(
+        description=(
+            f"Comma-separated symbols, up to {MAX_STREAM_SYMBOLS} -- a tighter cap "
+            "than the bar endpoints, because every symbol multiplies the frame rate. "
+            "Each one gets its own `tick` (or `bar`) event per interval."
+        ),
+        openapi_examples={
+            "default": {"summary": "The default", "value": "CUCKOO"},
+            "several": {"summary": "Several at once", "value": "CUCKOO,CRASH,MOON"},
+            "stale": {
+                "summary": "The one that looks healthy and is not",
+                "description": "STALE keeps ticking on schedule with a timestamp that "
+                "has stopped advancing. Watch `t`, not the arrival of bytes.",
+                "value": "STALE",
+            },
+        },
+    ),
+]
+
+StreamClockQ = Annotated[
+    str,
+    Query(
+        description=(
+            "`demo` (the default) is an always-open synthetic session -- alive at "
+            "11pm on a Sunday, which is what makes it usable for demos and CI. "
+            "`real` follows the NYSE calendar and sends nothing but heartbeats while "
+            "the market is closed."
+        ),
+        json_schema_extra={"enum": ["demo", "real"]},
+    ),
+]
+
+StreamScenarioQ = Annotated[
+    str,
+    Query(
+        description=(
+            "Stream-specific transport faults, comma-separated: `drop:S` closes the "
+            "socket at S seconds mid-frame with no close event; `garbage:N` mixes in "
+            "N unparseable frames; `silent:S` withholds data *and* heartbeats for S "
+            "seconds; `slow:MS` delays each frame; `truncate` cuts one frame mid-JSON "
+            "but leaves the connection up. The bar-endpoint effects (`flap`, "
+            "`status`) do not apply here and are rejected with a message saying so."
+        ),
+        openapi_examples={
+            "none": {"summary": "No faults (default)", "value": ""},
+            "drop": {
+                "summary": "Kill the socket at 20 seconds",
+                "description": "No close event, no error -- what a dying socket really looks like.",
+                "value": "drop:20s",
+            },
+            "silent": {
+                "summary": "Go quiet for 30 seconds",
+                "description": "Heartbeats withheld too. Finds missing read timeouts.",
+                "value": "silent:30s",
+            },
+            "garbage": {"summary": "Three unparseable frames", "value": "garbage:3"},
+        },
+    ),
+]
+
+_SSE_SAMPLE = """event: hello
+data: {"clock":"demo","symbols":["CUCKOO"],"synthetic":true,"generation":1}
+
+event: tick
+data: {"S":"CUCKOO","p":545.41,"t":"2026-08-19T19:06:00Z"}
+
+event: tick
+data: {"S":"CUCKOO","p":545.38,"t":"2026-08-19T19:06:01Z"}
+
+: hb
+
+"""
+
+
+@router.get(
+    STREAM_PATH,
+    tags=["cuckoo-native"],
+    summary="Live tick stream (Server-Sent Events)",
+    operation_id="stream_ticks",
+    response_description="An endless `text/event-stream` of hello, tick/bar and heartbeat frames.",
+    responses={
+        200: apidocs.response(
+            "An SSE stream. One `hello` event, then `tick` events (demo clock) or "
+            "`bar` events (real clock), with `: hb` comment heartbeats throughout.",
+            schema={"type": "string", "format": "binary"},
+            examples={
+                "demo": apidocs.example(
+                    "A demo-clock stream",
+                    _SSE_SAMPLE,
+                    "`hello` states the clock and generation. Each `tick` carries "
+                    "`S` (symbol), `p` (price) and `t` (the instant it claims to be). "
+                    "`: hb` is an SSE comment, not an event -- most clients drop it "
+                    "silently, which is the point: it only exists to keep the "
+                    "connection from idling out.",
+                )
+            },
+            headers={
+                "Cache-Control": apidocs.header("Always `no-cache`.", "no-cache"),
+                "X-Accel-Buffering": apidocs.header(
+                    "`no`, so no proxy buffers the stream into uselessness.", "no"
+                ),
+                "X-Cuckoo-Scenario": apidocs.header(
+                    "Echoed back when faults were requested.", "drop:20s"
+                ),
+            },
+        ),
+        400: apidocs.response(
+            "An invalid `clock`, symbol list, or scenario spec.",
+            schema=apidocs.ref("AlpacaError"),
+            examples={
+                "clock": apidocs.example(
+                    "Unknown clock",
+                    {"code": 40010001, "message":
+                     "invalid clock 'nyse': use clock=demo (always-open synthetic "
+                     "session, the default) or clock=real (follows the NYSE calendar)"},
+                ),
+                "scenario": apidocs.example(
+                    "A bar-only effect on the stream",
+                    {"code": 40010001, "message":
+                     "scenario=flap only applies to the bar endpoints; here you can "
+                     "use drop, garbage, silent, slow, truncate"},
+                ),
+            },
+        ),
+        429: apidocs.response(
+            f"More than {MAX_STREAMS_PER_IP} concurrent streams from this address.",
+            schema=apidocs.ref("AlpacaError"),
+            examples={
+                "concurrent": apidocs.example(
+                    "Too many open streams",
+                    {"code": 42910000, "message":
+                     f"too many concurrent streams from this address "
+                     f"(max {MAX_STREAMS_PER_IP})"},
+                    "A separate limit from the per-minute request budget: this one "
+                    "counts sockets held open, not requests made.",
+                )
+            },
+        ),
+    },
+    openapi_extra=apidocs.extras(
+        samples=(
+            (
+                "Shell",
+                "curl",
+                "# SSE is curl-able, which makes it its own documentation\n"
+                'curl -N "https://cuckootrade.com/api/v1/stream?symbols=CUCKOO,CRASH"',
+            ),
+            (
+                "JavaScript",
+                "EventSource",
+                'const es = new EventSource(\n'
+                '  "https://cuckootrade.com/api/v1/stream?symbols=CUCKOO,CRASH"\n'
+                ');\n'
+                'es.addEventListener("hello", (e) => console.log(JSON.parse(e.data)));\n'
+                'es.addEventListener("tick", (e) => {\n'
+                '  const { S, p, t } = JSON.parse(e.data);\n'
+                '  console.log(S, p, t);   // compare t to now: STALE stops advancing\n'
+                '});\n'
+                '// Reconnect on error: the stream closes itself after 15 minutes.\n'
+                'es.onerror = () => console.warn("stream dropped");',
+            ),
+            (
+                "Shell",
+                "curl (fault injection)",
+                "# The socket dies at twenty seconds, mid-frame, every time\n"
+                'curl -N "https://cuckootrade.com/api/v1/stream?symbols=CUCKOO'
+                '&scenario=drop:20s"',
+            ),
+        ),
+    ),
+)
+async def sse_stream(request: Request, symbols: StreamSymbolsQ = "CUCKOO",
+                     clock: StreamClockQ = "demo", seed: apidocs.SeedQ = "",
+                     scenario: StreamScenarioQ = ""):
+    """A Server-Sent Events stream of simulated ticks. Deliberately not a
+    WebSocket: SSE is curl-able, which makes it its own documentation.
+
+    **Frame grammar.** One `hello` event on connect, stating the clock, the
+    symbols and the generation. Then, per symbol per interval, either a `tick`
+    (demo clock) carrying `S`, `p` and `t`, or a `bar` (real clock) carrying `S`
+    plus the full OHLCV bar. Interleaved throughout are `: hb` comment
+    heartbeats -- SSE comments, not events, which most clients drop silently.
+
+    **The heartbeats are load-bearing.** They flow every ~15 seconds regardless
+    of data because the load balancer kills idle connections, and a `HALTS`
+    session or a closed market is silent by design. `STALE` is where they matter
+    most: its ticks keep arriving on schedule carrying a timestamp that has
+    stopped advancing, so the connection looks perfectly healthy while the data
+    is dead. Check `t`, not the arrival of bytes.
+
+    **Two clocks.** `demo` (default) is an always-open synthetic session whose
+    prices are a pure function of the wall clock -- every replica and every
+    viewer sees the same tick at the same instant. `real` follows the NYSE
+    calendar and emits each symbol's latest completed minute bar at minute
+    boundaries, heartbeating only while the market is closed.
+
+    **Limits.** 10 symbols per stream, 5 concurrent streams per address, and
+    every connection closes itself after 15 minutes -- bounded so a leaked
+    connection cannot accumulate. Clients are expected to reconnect;
+    `EventSource` does it automatically.
+    """
     from common import api_error, parse_symbols
 
     symbol_list = parse_symbols(

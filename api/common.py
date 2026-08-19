@@ -145,10 +145,18 @@ def paginate_bars(symbols, tf, start_dt, end_dt, limit, seed, page_token, descen
     bars_by_symbol: dict[str, list] = {}
     budget = limit
     next_token = None
+    last_served: tuple[str, str] | None = None
     for symbol in symbols:
         if resume_symbol is not None and symbol < resume_symbol:
             bars_by_symbol[symbol] = []
             continue
+        if budget == 0:
+            # An earlier symbol consumed the budget exactly and symbols remain,
+            # so the page is full. Resume after the last bar actually served --
+            # tokenizing this untouched symbol instead would serve a page whose
+            # own token pointed at nothing.
+            next_token = encode_token(*last_served)
+            break
         sym_start, sym_end = start_dt, end_dt
         if symbol == resume_symbol and resume_t is not None:
             edge = parse_time(resume_t, "page_token") + (
@@ -172,6 +180,8 @@ def paginate_bars(symbols, tf, start_dt, end_dt, limit, seed, page_token, descen
             break
         bars_by_symbol[symbol] = bars
         budget -= len(bars)
+        if bars:
+            last_served = (symbol, bars[-1]["t"])
     return bars_by_symbol, next_token
 
 

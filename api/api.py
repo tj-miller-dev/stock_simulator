@@ -28,28 +28,34 @@ import time
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse, StreamingResponse
 
+import apidocs
 import providers
 from actions import ACTIONS_PATH, router as actions_router
+from apidocs import DESCRIPTION, DISCLAIMER, DOCS_URL, SERVERS, SUMMARY, TAGS
 from common import EXAMPLE
 from effects import AttemptCounter, EffectError, has, parse_scenario, value_of
 from engine import GENERATION
 from ratelimit import TokenBucketLimiter, client_ip
 from stream import STREAM_PATH, router as stream_router
 
-DOCS_URL = "https://cuckootrade.com/docs"
-DISCLAIMER = (
-    "All data is synthetic. CuckooTrade exists for exercising code paths -- "
-    "development, CI, demos, tutorials -- never for validating trading "
-    "strategies: a profitable backtest on synthetic data means nothing."
-)
-
 # The docs endpoints hang off the app, not off the /api-prefixed routes, so
 # they must be prefixed by hand or the ALB routes them to the frontend.
+#
+# Everything documentary here comes from apidocs.py: the OpenAPI document is
+# where people and SDK generators actually read this API, so it is written
+# deliberately rather than left to whatever FastAPI can infer.
 app = FastAPI(
     title="CuckooTrade",
-    description=DISCLAIMER,
+    summary=SUMMARY,
+    description=DESCRIPTION,
+    version=f"1.0 (generation {GENERATION})",
+    openapi_tags=TAGS,
+    servers=SERVERS,
+    contact={"name": "CuckooTrade", "url": DOCS_URL},
+    license_info={"name": "MIT", "identifier": "MIT"},
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
@@ -241,15 +247,108 @@ async def cuckoo_middleware(request: Request, call_next):
     return response
 
 
-@app.get("/api/health")
+@app.get(
+    "/api/health",
+    tags=["meta"],
+    summary="Liveness and readiness probe",
+    operation_id="health",
+    response_description="The service is up.",
+    responses={
+        200: apidocs.response(
+            "Always `{\"status\": \"ok\"}` when the process is serving.",
+            schema=apidocs.ref("HealthResponse"),
+            examples={"ok": apidocs.example("Healthy", {"status": "ok"})},
+        )
+    },
+    openapi_extra=apidocs.extras(
+        samples=(("Shell", "curl", 'curl -i "https://cuckootrade.com/api/health"'),),
+    ),
+)
 def health():
+    """What kubelet and the ALB call, exempt from rate limiting so a probe can
+    never starve behind someone else's scan, and the one path left out of the
+    access log -- probing every few seconds per pod, it would otherwise bury
+    the lines describing real callers."""
     return {"status": "ok"}
 
 
-@app.get("/api")
+@app.get(
+    "/api",
+    tags=["meta"],
+    summary="Machine-readable service index",
+    operation_id="index",
+    response_description="Every provider, endpoint, ticker and example URL in one document.",
+    responses={
+        200: apidocs.response(
+            "The whole surface in one fetch: provider base URLs and SDK hints, the "
+            "scenario ticker table, the `scenario=` fault grammar, the restatement "
+            "contract, and a working example URL for every endpoint.",
+            schema=apidocs.ref("IndexResponse"),
+            examples={
+                "index": apidocs.example(
+                    "The index (abridged)",
+                    {
+                        "name": "CuckooTrade",
+                        "synthetic": True,
+                        "api_version": 1,
+                        "generation": GENERATION,
+                        "tagline": "Deterministic synthetic market data. No key, no signup.",
+                        "disclaimer": DISCLAIMER,
+                        "path_scheme": "/api/v1/{provider}/<provider's own path> ...",
+                        "docs": {
+                            "site": DOCS_URL,
+                            "openapi": "/api/openapi.json",
+                            "swagger": "/api/docs",
+                            "llms": "https://cuckootrade.com/llms.txt",
+                        },
+                        "magic_tickers": {
+                            "CRASH": "sharp ~25% crash mid-month, slow recovery",
+                            "...": "nine more, plus the three restating tickers",
+                        },
+                        "providers": {
+                            "alpaca": {
+                                "status": "available",
+                                "base_url": "https://cuckootrade.com/api/v1/alpaca",
+                                "compatible_with": "https://data.alpaca.markets",
+                                "sdk_hint": "StockHistoricalDataClient(url_override=...)",
+                                "endpoints": ["..."],
+                            },
+                            "...": "alphavantage, polygon",
+                        },
+                        "rate_limit": "60 req/min sustained, burst 120, per address, no key.",
+                    },
+                    "Abridged -- the live response also carries the full ticker "
+                    "tables, the `restatement` and `fault_injection` sections, and "
+                    "every provider's endpoint list. Fetch it to see all of it.",
+                )
+            },
+        )
+    },
+    openapi_extra=apidocs.extras(
+        samples=(
+            ("Shell", "curl", 'curl "https://cuckootrade.com/api" | jq .'),
+            (
+                "Python",
+                "requests",
+                'import requests\n'
+                'index = requests.get("https://cuckootrade.com/api").json()\n'
+                'print(index["magic_tickers"])              # the scripted symbols\n'
+                'print(index["providers"]["alpaca"]["sdk_hint"])',
+            ),
+        ),
+    ),
+)
 def index():
-    """Machine-readable index: enough for an agent that lands here with no
-    other context to make its first successful call."""
+    """The orientation document, sized for an agent rather than a person.
+
+    Everything needed to make a correct first call, with no other fetch: the
+    provider base URLs and how to point each SDK at them, the ticker tables,
+    the two determinism axes, and a working example URL for every endpoint.
+
+    This and `/api/openapi.json` say the same things at different resolutions.
+    The index is a compact briefing; the OpenAPI document is the reference,
+    with per-field descriptions and worked examples.
+    """
     return {
         "name": "CuckooTrade",
         "synthetic": True,
@@ -365,6 +464,32 @@ for provider_router in providers.ROUTERS:
     app.include_router(provider_router)
 app.include_router(stream_router)
 app.include_router(actions_router)
+
+
+def _openapi():
+    """The generated document, plus what generation cannot see.
+
+    `scenario=`, the X-Cuckoo-* headers and the 429 are produced by
+    cuckoo_middleware above, so they belong to every operation and are declared
+    by no route. apidocs.finalize injects them once, which also means a
+    provider added to providers/ later is documented correctly for free.
+    """
+    if not app.openapi_schema:
+        app.openapi_schema = apidocs.finalize(get_openapi(
+            title=app.title,
+            version=app.version,
+            summary=app.summary,
+            description=app.description,
+            routes=app.routes,
+            tags=app.openapi_tags,
+            servers=app.servers,
+            contact=app.contact,
+            license_info=app.license_info,
+        ))
+    return app.openapi_schema
+
+
+app.openapi = _openapi
 
 
 if __name__ == "__main__":
