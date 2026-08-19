@@ -9,6 +9,12 @@ metadata:
     alb.ingress.kubernetes.io/target-type: ip
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
     alb.ingress.kubernetes.io/ssl-redirect: "443"
+    # The API only mounts /api/* -- it 404s on "/", which is the target group's
+    # default health check path, so without this every api target is marked
+    # unhealthy. The ALB then fails open (it routes to all targets when none are
+    # healthy), which is why this stayed invisible: traffic still flowed, but
+    # with no health gating at all and a 404 per check spamming the pod logs.
+    alb.ingress.kubernetes.io/healthcheck-path: /api/health
     # SSE streams heartbeat every 15s; the ALB default idle timeout of 60s
     # would still kill a stalled stream mid-halt, so give it headroom. This is
     # an ALB-level attribute -- declared once here, it applies to the whole
