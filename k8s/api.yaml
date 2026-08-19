@@ -4,6 +4,15 @@ metadata:
   name: api
 spec:
   replicas: 2
+  strategy:
+    rollingUpdate:
+      # The node caps out at 17 pods and steady state is 16, so a surge pod
+      # has nowhere to land -- the rollout would block forever waiting for
+      # capacity that only frees up when the rollout finishes. Replace in
+      # place instead: one old pod goes, one new pod takes its slot, and the
+      # other replica serves throughout.
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app: api
@@ -14,7 +23,7 @@ spec:
     spec:
       containers:
         - name: api
-          image: 307946643562.dkr.ecr.us-east-1.amazonaws.com/stock-simulator-api:fc68dd57d114994592a24c1bf9d8da4c8b122f90
+          image: 307946643562.dkr.ecr.us-east-1.amazonaws.com/stock-simulator-api:4798af518889f488ad0b4b8434392d8236b6ef40
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000
