@@ -99,7 +99,9 @@ field in `k8s/api.yaml` / `k8s/frontend.yaml` to match.
 
 The account ID (`307946643562`) is fixed to this AWS account — it won't change across a
 destroy/recreate of the same account. If you ever deploy into a *different* AWS account,
-update the `image:` fields in `k8s/api.yaml` and `k8s/frontend.yaml`, and the
+update the `image:` fields in `k8s/api.yaml` and `k8s/frontend.yaml`, the
+`access_logs.s3.bucket` attribute in `k8s/ingress.yaml` (the bucket name embeds the
+account ID — `terraform output alb_access_logs_bucket` prints the correct value), and the
 `ECR_REGISTRY` / `role-to-assume` values in `.github/workflows/deploy.yml`.
 
 ## 4. Bootstrap ArgoCD (one-time, manual)
@@ -186,6 +188,92 @@ aws cloudtrail lookup-events --lookup-attributes \
   AttributeKey=EventName,AttributeValue=AssumeRoleWithWebIdentity \
   --max-results 3 --query 'Events[].CloudTrailEvent' --output text
 ```
+
+## Seeing who's actually using it
+
+There is no analytics vendor and no tracking script. Usage is reconstructed from request
+logs, which live in two places with very different lifespans:
+
+| Where | Contains | Lifespan |
+|---|---|---|
+| **S3** — `stock-simulator-alb-logs-<account>` | Every request to *both* services at the ALB: client IP, path + query string, status, user agent, referer, bytes, latency | 90 days (lifecycle rule) |
+| **Pod stdout** — `kubectl logs` | Same requests, per service, human-readable | Dies with the pod — a deploy, restart, or scale-down wipes it |
+
+The S3 copy is the one that answers "are people coming back". Pod logs are for debugging
+what's happening *right now*.
+
+> **Order matters when enabling this.** The bucket and its policy come from Terraform, but
+> the switch that turns logging on is the `access_logs.s3.*` attribute in
+> `k8s/ingress.yaml`, which ArgoCD applies. If that annotation reaches the cluster before
+> the bucket exists, the load balancer controller fails reconciliation with
+> `InvalidConfigurationRequest: Access Denied for bucket` and stops applying *any* ingress
+> change until it's fixed. Run `terraform apply` first, then merge the manifest. On a
+> rebuild from scratch the normal step order already does this — Terraform is step 1,
+> ArgoCD is step 4.
+
+Two things are deliberately off, and both cost money for little return here: EKS
+control-plane logging to CloudWatch (see `terraform/modules/cluster/main.tf`), and any
+log-shipping agent. If you ever want pod logs to outlive their pod, that's the gap to fill.
+
+### Reading the ALB logs
+
+ALB flushes gzipped log files to S3 every 5 minutes. At this traffic level (~1k
+requests/day) the whole corpus is small enough to just pull down and grep — Athena is
+real setup effort and only starts paying off at a few million rows. Sync a day and
+decompress:
+
+```bash
+BUCKET=$(cd terraform && terraform output -raw alb_access_logs_bucket)
+aws s3 sync "s3://$BUCKET/alb/AWSLogs/307946643562/elasticloadbalancing/us-east-1/2026/08/19/" ./alblogs/
+gunzip -c ./alblogs/*.gz > day.log
+```
+
+Fields are space-separated, but the interesting ones are *quoted* and contain spaces
+themselves, so splitting on whitespace only works for the leading fields. Two different
+awk separators are needed: `client:port` is whitespace field **4** and `elb_status_code`
+is **9**, while splitting on `"` puts the request line in **2** and the user agent in
+**4**. Some recipes:
+
+```bash
+# unique visitors in this day
+awk '{print $4}' day.log | cut -d: -f1 | sort -u | wc -l
+
+# busiest addresses -- a caller appearing across several synced days is your repeat traffic
+awk '{print $4}' day.log | cut -d: -f1 | sort | uniq -c | sort -rn | head -20
+
+# what symbols people ask for -- the actual product-usage signal
+grep -o 'symbols\?=[^& "]*' day.log | sed 's/.*=//' | tr ',' '\n' | sort | uniq -c | sort -rn
+
+# who is calling, minus health checkers and WordPress vulnerability scanners
+grep -v 'ELB-HealthChecker\|wp-\|xmlrpc' day.log | awk -F'"' '{print $4}' | sort | uniq -c | sort -rn
+
+# endpoints, with the query string stripped
+awk -F'"' '{print $2}' day.log | awk '{print $2}' | sed 's/?.*//' | sort | uniq -c | sort -rn
+```
+
+**Discount the site's own traffic.** `frontend/src/ribbon.js` opens an SSE stream for its
+nine ticker symbols on *every* page load, and `/playground` requests all eight magic
+tickers — so `CUCKOO`, `SPY`, `CRASH`, `MOON`, `AAPL`, `NVDA`, `TSLA`, `PENNY`, `CHOPPY`
+counts are mostly the landing page calling itself. Outside usage is the residue:
+unfamiliar symbols, lowercase input, and non-browser user agents (`python-httpx`, `curl`,
+`okhttp`, custom agent strings).
+
+If the corpus does outgrow grep, AWS publishes the Athena `CREATE EXTERNAL TABLE` DDL for
+this exact log format —
+[Query ALB logs with Athena](https://docs.aws.amazon.com/athena/latest/ug/application-load-balancer-logs.html).
+
+### Reading pod logs
+
+```bash
+kubectl logs -l app=api --tail=100      # one line per request, health checks excluded
+kubectl logs -l app=frontend --tail=100 # nginx combined format; client IP is the last field
+```
+
+The API line is emitted by `cuckoo_middleware` in `api/api.py`, not uvicorn — uvicorn's
+own access log reports the socket peer, which behind the ALB is a load balancer ENI in
+`10.0.0.0/16` and identical for every caller. The middleware reads `X-Forwarded-For`
+instead (last entry — the ALB appends the address it actually saw, so earlier entries are
+caller-supplied and forgeable).
 
 ## Tearing everything down
 

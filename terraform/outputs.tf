@@ -21,6 +21,11 @@ output "acm_certificate_arn" {
   value       = module.dns.certificate_arn
 }
 
+output "alb_access_logs_bucket" {
+  description = "Where the ALB writes request logs. Must match access_logs.s3.bucket in k8s/ingress.yaml -- that annotation is applied verbatim by ArgoCD and can't read this value."
+  value       = module.loadbalancer.access_logs_bucket
+}
+
 output "argocd_initial_admin_password_command" {
   description = "ArgoCD's auto-generated admin password lives in a secret -- run this to read it"
   value       = "kubectl -n ${module.gitops.namespace} get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d"
