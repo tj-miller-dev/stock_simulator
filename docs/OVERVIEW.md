@@ -104,6 +104,7 @@ The combination — no single leg is unique, the set is:
 | SSE streaming in V1 (Alpaca-compatible WebSocket in V2) | Serves the live hero chart and the agent/demo audiences at once; SSE is trivial in FastAPI and curl-able. Note the ALB 60s idle timeout → heartbeats required. |
 | Dark trading-terminal aesthetic, restrained, with the cuckoo identity in voice + one mark | Domain-native and flashy (owner preference); differentiation carried by brand voice and the interactive hero, not the palette. No CRT/scanline costume. |
 | Landing page content must be static/prerendered HTML | SEO + LLM-citation quotability; a client-rendered SPA is invisible to both. Interactive parts mount as islands. |
+| Usage measured from ALB access logs in S3, not an analytics script (Aug 2026) | The audiences that matter most — CI pipelines, coding agents, curl — never execute JavaScript, so a page tracker would be blind to exactly the traffic worth counting. Edge logs also cover the API, which is the product. 90-day retention bounds both cost and how long client IPs are kept. |
 | Open source, MIT license, one repo | Adoption is the currency; CI users need readable source; the infra being public *is* the portfolio. Self-hosting is a feature, not lost revenue. |
 | `"synthetic": true` marking + backtest disclaimer everywhere | Ethical load-bearing wall (see "backtest trap" above). |
 | V2 named but frozen: fake broker | Design the V1 price engine as an internal queryable service so V2 can consume it, but build no order/position state now. |

@@ -20,6 +20,10 @@ is stuck. Error *shape* follows the provider being mimicked (Alpaca's
 {"status":"ERROR",...}).
 """
 
+import logging
+import sys
+import time
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -58,6 +62,48 @@ app.add_middleware(
 
 limiter = TokenBucketLimiter()
 
+# Own handler rather than uvicorn's access logger, which reports the socket peer
+# -- behind the ALB that's a load balancer ENI in 10.0.0.0/16, identical for every
+# caller, and carries no user agent. `access_log=False` below turns that line off
+# so each request produces exactly one, richer, line. propagate=False keeps this
+# independent of however uvicorn reconfigures logging at startup.
+_handler = logging.StreamHandler(sys.stdout)
+_handler.setFormatter(logging.Formatter("%(asctime)s %(message)s", "%Y-%m-%dT%H:%M:%S"))
+access_log = logging.getLogger("cuckoo.access")
+access_log.addHandler(_handler)
+access_log.setLevel(logging.INFO)
+access_log.propagate = False
+
+
+def _log_request(request: Request, status: int, started: float) -> None:
+    """One line per real request: who called, what they asked for, how it went.
+
+    Health checks are dropped -- kubelet and the ALB between them probe
+    /api/health every few seconds per pod, which buried the few percent of lines
+    describing actual users. The query string is kept deliberately: it's the only
+    place the requested symbols show up.
+
+    This is a live-debugging aid, not the analytics record -- pod stdout dies with
+    the pod. The durable copy is the ALB access log (terraform/modules/loadbalancer).
+    """
+    if request.url.path == "/api/health":
+        return
+    # Anything a caller controls gets stripped to printable characters before it
+    # reaches a log line, so a crafted header can't forge entries.
+    raw_ua = request.headers.get("user-agent", "-")
+    ua = "".join(c for c in raw_ua if c.isprintable())[:120].replace('"', "'")
+    query = f"?{request.url.query}" if request.url.query else ""
+    access_log.info(
+        'ip=%s status=%d dur=%dms %s %s%s ua="%s"',
+        client_ip(request),
+        status,
+        int((time.perf_counter() - started) * 1000),
+        request.method,
+        request.url.path,
+        query,
+        ua,
+    )
+
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
@@ -86,29 +132,38 @@ async def cuckoo_middleware(request: Request, call_next):
     """Synthetic marking on every response, plus keyless per-IP rate limiting
     (health checks exempt so kubelet probes never starve behind a scan)."""
     path = request.url.path
+    started = time.perf_counter()
     limited = path.startswith("/api") and path != "/api/health"
-    if limited:
-        allowed, remaining, reset = limiter.check(client_ip(request))
-        if not allowed:
-            response = JSONResponse(
-                status_code=429,
-                content={
-                    "code": 42910000,
-                    "message": "rate limit exceeded: 60 requests/minute sustained "
-                    "(burst 120) per address, no key required. Back off using the "
-                    "RateLimit-Reset header.",
-                },
-            )
+    try:
+        if limited:
+            allowed, remaining, reset = limiter.check(client_ip(request))
+            if not allowed:
+                response = JSONResponse(
+                    status_code=429,
+                    content={
+                        "code": 42910000,
+                        "message": "rate limit exceeded: 60 requests/minute sustained "
+                        "(burst 120) per address, no key required. Back off using the "
+                        "RateLimit-Reset header.",
+                    },
+                )
+            else:
+                response = await call_next(request)
+            response.headers["RateLimit-Limit"] = str(int(limiter.capacity))
+            response.headers["RateLimit-Remaining"] = str(max(0, remaining))
+            response.headers["RateLimit-Reset"] = str(reset)
         else:
             response = await call_next(request)
-        response.headers["RateLimit-Limit"] = str(int(limiter.capacity))
-        response.headers["RateLimit-Remaining"] = str(max(0, remaining))
-        response.headers["RateLimit-Reset"] = str(reset)
-    else:
-        response = await call_next(request)
+    except Exception:
+        # Unhandled errors are turned into a 500 by Starlette's outermost
+        # middleware, past this point -- log it here or the request that broke
+        # the server is the one request missing from the log.
+        _log_request(request, 500, started)
+        raise
     response.headers["X-Cuckoo-Synthetic"] = "true"
     response.headers["X-Cuckoo-Generation"] = str(GENERATION)
     response.headers["X-Cuckoo-Docs"] = DOCS_URL
+    _log_request(request, response.status_code, started)
     return response
 
 
@@ -178,4 +233,6 @@ app.include_router(stream_router)
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # access_log=False: cuckoo_middleware emits the access line instead, with the
+    # real client address and user agent rather than the ALB's ENI.
+    uvicorn.run(app, host="0.0.0.0", port=8000, access_log=False)
