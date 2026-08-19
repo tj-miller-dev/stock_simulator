@@ -1,6 +1,6 @@
 # CuckooTrade V1.1 — Failure Modes
 
-Status: **agreed, in build** on branch `add_new_failure_modes` (Aug 2026). Context in
+Status: **built** on branch `add_new_failure_modes` (Aug 2026), pending merge. Context in
 [OVERVIEW.md](OVERVIEW.md); V1 build contract in [V1_SPEC.md](V1_SPEC.md), which this
 extends. Everything here is additive — no V1 behavior changes except where §3.4 says so
 explicitly.
@@ -92,11 +92,15 @@ every time, for everyone. Reproducible chaos is a genuinely differentiating line
 chaos-engineering tools people know are random, random failures make flaky tests, and
 flaky tests are why nobody runs them in CI. Ours belong in CI.
 
-**Data effects** — every magic ticker's shape, by lowercase name (`crash`, `moon`,
-`flat`, `gappy`, `halts`, `stale`, `spikey`, `penny`, `choppy`), applied to whatever
-symbol was requested while keeping that symbol's own price level.
+**Data effects are reserved, not built.** The lowercase magic-ticker names (`crash`,
+`moon`, `flat`, `gappy`, `halts`, `stale`, `spikey`, `penny`, `choppy`) are recognised
+by the parser and rejected with a message pointing at the ticker itself
+(`symbols=CRASH`). Applying a price shape to an arbitrary symbol means threading an
+overlay through the engine's cached internals — a separate piece of work, and the one
+V1_SPEC §2 actually named as the V1.1 candidate. Holding the names costs nothing and
+stops this release burning a namespace we already promised.
 
-**Transport effects**
+**Transport effects** (what shipped)
 
 | Effect | Surface | Behavior | Exercises |
 |---|---|---|---|
@@ -115,17 +119,22 @@ asserts it *recovers*. That's a green test, and green tests get kept.
 
 - Nothing fires without the parameter. Ever. This is what protects the brand, and it
   gets its own test (§4.6).
-- Any request carrying a `transport` effect responds `Cache-Control: no-store` and
-  never `immutable`. `data` effects stay as cacheable as the underlying window.
+- Any request carrying a transport effect responds `Cache-Control: no-store` and never
+  `immutable`: a fault lies about a moment, and the immutability rule in `common.py`
+  must never cache one. (Data effects, when built, stay as cacheable as their window.)
 - `X-Cuckoo-Scenario` echoes the parsed effects, so a confused developer can see in
   their own logs what they asked for.
 - Unknown names get the house error treatment: list the valid ones, include a working
   example.
 
-Implementation notes: `flap` and `status`-after-n need a per-IP counter — per-pod
-in-memory is fine, `ratelimit.py` already establishes both the precedent and the
-honesty about its limits. `truncate` over HTTP may not survive the ALB; verify before
-promising it in the docs.
+Implementation notes: `flap` is the one thing here that cannot be stateless, since
+"fail the first n attempts" means remembering attempts. Its counter is per-pod and
+in-memory with the same caveat `ratelimit.py` already carries — across N replicas a
+`flap:n` can burn up to n×N failures — disclosed in the docs, the `/api` index and the
+error text rather than papered over. It keys on the full query string so two endpoints
+under test at once cannot consume each other's budget. HTTP `truncate` was verified end
+to end against a real server (`httpx` raises on the short read); watch it if the ALB
+ever normalises response bodies.
 
 ## 3. `as_of` — restatement, and the second axis of determinism
 
@@ -173,7 +182,16 @@ across the announcement date:
 |---|---|
 | `SPLITS` | Recurring 4:1 forward split. Prior closes ÷4 and volumes ×4 once the announcement date passes. Loud, obvious, the teaching example. |
 | `DIVVY` | A **late** dividend adjustment: the ex-date passes, the adjustment lands ~5 sessions later and retroactively shaves prior closes ~1–2%. Small enough to slip past a naive "did anything move more than 10%" check. This is the one that was actually asked for, and it's the cruel one. |
-| `REVISED` | A bad print — a `SPIKEY`-style wick that exists in history, then silently disappears when the exchange busts the trade. Vendor correction with no corporate action to explain it. |
+| `REVISED` | A bad print — one session priced ~8% too high, carried in history until the exchange busts the trade, then quietly corrected. A vendor restatement with no corporate action to explain it. |
+
+Two bounds keep this honest, and both are documented on the site rather than buried:
+
+- **Actions have a six-month horizon.** Anything older counts as already baked into
+  history. Without that, monthly actions compound without limit and adjusted prices from
+  a decade ago collapse toward zero.
+- **This models the restatement, not the ex-date discontinuity.** A split rewrites the
+  history in front of it; you will not see the price halve on the ex-date itself. The
+  reconciliation case — the thing actually asked for — is fully served either way.
 
 ### 3.3 Something to reconcile against
 
@@ -225,3 +243,6 @@ Extending V1_SPEC §9. Same standard: these are the definition of done.
 | Transport faults ride `scenario=`, not a separate `chaos=` | One grammar, one parser, one documented list; the `data`/`transport` split is an internal tag that only caching cares about. V1_SPEC §2 already reserved the name. |
 | `DIVVY`, not `DIVIDEND` | Matches the existing short, wry ticker names (`GAPPY`, `SPIKEY`). |
 | Three commits, one branch (`add_new_failure_modes`), merged together | Each is independently revertible; none is separately shippable to production ahead of the others. |
+| `adjustment` defaults to `all`, unlike Alpaca's `raw` | The restatement tickers exist to be seen restating, and no ordinary symbol here has a corporate action, so the deviation is observable only on `SPLITS`/`DIVVY`/`REVISED`. Documented at every surface. |
+| Adjustments apply per *day*, before aggregation | Keeps cross-timeframe coherence true by construction — a week straddling an ex-date is built from adjusted dailies rather than patched afterwards. Split ratios stay whole numbers so volume remains exactly additive. Proven by extending the existing coherence test to `SPLITS`/`DIVVY`. |
+| Restatement tickers stay out of the landing-page scenario gallery | The gallery is a sparkline showcase and their signature is not visual — it is that the same request answers differently over time. They appear in the docs, `llms.txt`, the README, the playground picker and `/api`. |

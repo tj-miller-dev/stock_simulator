@@ -14,7 +14,8 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException
 
-from engine import GENERATION, bars_range, parse_timeframe
+from engine import (GENERATION, RESTATING_TICKERS, bars_range, parse_adjustment,
+                    parse_timeframe)
 
 PUBLIC_HOST = "https://cuckootrade.com"
 
@@ -99,6 +100,21 @@ def parse_common(timeframe, start, end, limit, seed, generation):
     return tf, start_dt, end_dt, (limit or BARS_DEFAULT_LIMIT), seed or ""
 
 
+def parse_history(as_of: str | None, adjustment: str | None):
+    """The two restatement knobs (V1_1_SPEC section 3), shared by every surface.
+
+    `as_of` is CuckooTrade's own and is deliberately spelled with the
+    underscore: Alpaca's `asof` is a symbol-mapping date and means something
+    else entirely, so conflating them would break the mimicry.
+    """
+    as_of_dt = parse_time(as_of, "as_of") if as_of else None
+    try:
+        mode = parse_adjustment(adjustment)
+    except ValueError as exc:
+        api_error(400, 40010001, f"{exc} -- working example: {EXAMPLE}")
+    return as_of_dt, mode
+
+
 def encode_token(symbol: str, last_t: str) -> str:
     return base64.urlsafe_b64encode(f"v1|{symbol}|{last_t}".encode()).decode()
 
@@ -117,7 +133,8 @@ def decode_token(token: str) -> tuple[str, str]:
         )
 
 
-def paginate_bars(symbols, tf, start_dt, end_dt, limit, seed, page_token, descending):
+def paginate_bars(symbols, tf, start_dt, end_dt, limit, seed, page_token, descending,
+                  as_of=None, adjustment="all"):
     """Alpaca pagination semantics: symbols alphabetically, `limit` counts
     total bars across symbols, next_page_token resumes exactly after the last
     bar served."""
@@ -145,6 +162,7 @@ def paginate_bars(symbols, tf, start_dt, end_dt, limit, seed, page_token, descen
         bars, truncated = bars_range(
             symbol, tf, sym_start, sym_end, seed=seed,
             max_bars=budget + 1, descending=descending,
+            as_of=as_of, adjustment=adjustment,
         )
         if len(bars) > budget:
             served = bars[:budget]
@@ -157,8 +175,18 @@ def paginate_bars(symbols, tf, start_dt, end_dt, limit, seed, page_token, descen
     return bars_by_symbol, next_token
 
 
-def maybe_cache_forever(response, end_specified: bool, end_dt) -> None:
-    """History never changes here: a fully-specified window that ended in the
-    past is immutable, so say so and let any cache keep it forever."""
-    if end_specified and end_dt < datetime.now(timezone.utc) - timedelta(days=1):
-        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+def maybe_cache_forever(response, end_specified: bool, end_dt, *, symbols=(),
+                        as_of=None) -> None:
+    """A fully-specified window that ended in the past is immutable *for a
+    fixed as_of*, so say so and let any cache keep it forever.
+
+    The restatement tickers are the exception that made this precise. Without
+    an explicit as_of, their past is exactly the thing that changes -- pinning
+    it in a CDN for a year would serve pre-split prices long after the split
+    (V1_1_SPEC section 3.4).
+    """
+    if not (end_specified and end_dt < datetime.now(timezone.utc) - timedelta(days=1)):
+        return
+    if as_of is None and any(s in RESTATING_TICKERS for s in symbols):
+        return
+    response.headers["Cache-Control"] = "public, max-age=31536000, immutable"

@@ -13,6 +13,11 @@ my broker's API, with no signup.*
 
 **Every bar is a pure function of `(symbol, timestamp, generation, seed)`.**
 
+> Extended in V1.1: the tuple gained an `as_of` coordinate so the feed can
+> *restate* the way real ones do. Pinning `as_of` preserves this section
+> verbatim; omitting it is what lets a corporate action rewrite stored history.
+> See [V1_1_SPEC.md](V1_1_SPEC.md) section 3.
+
 - No database, no stored state. Two users querying SPY for last March get identical
   bytes, regardless of query window, timeframe, other symbols in the request, or which
   replica serves them.
@@ -94,6 +99,9 @@ view** (so demos and casual queries always show the goods).
 | `SPIKEY` | Single-minute fat-finger wicks (~10% instantaneous spikes that immediately revert) |
 | `PENNY`  | Sub-dollar price (~$0.30), high relative volatility — flushes float/precision bugs |
 | `CHOPPY` | High volatility, zero net drift — mean-reversion torture test |
+| `SPLITS` | 2:1 forward split monthly; prior closes restate when it goes ex (V1.1) |
+| `DIVVY`  | Monthly dividend whose ~1.5% adjustment lands five sessions *late* (V1.1) |
+| `REVISED` | A bad print that history carries until the exchange busts it (V1.1) |
 
 Rules: exactly this list in V1 (8 is enough; each is a small, fun, self-contained
 open-source contribution surface later). Scripted tickers respect the schema — never

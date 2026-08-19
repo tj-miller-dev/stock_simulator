@@ -31,6 +31,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
 import providers
+from actions import ACTIONS_PATH, router as actions_router
 from common import EXAMPLE
 from effects import AttemptCounter, EffectError, has, parse_scenario, value_of
 from engine import GENERATION
@@ -269,6 +270,26 @@ def index():
             "swagger": "/api/docs",
             "llms": "https://cuckootrade.com/llms.txt",
         },
+        "restatement": {
+            "param": "as_of",
+            "purpose": "answer as the feed would have on that date (RFC-3339). "
+            "Real feeds restate -- a split or a late dividend rewrites bars you "
+            "already stored -- so `as_of` is the second axis of the determinism "
+            "guarantee: pin it and the bytes never change, omit it and restating "
+            "symbols answer as of today.",
+            "tickers": {
+                "SPLITS": "2:1 forward split monthly; prior closes halve when it goes ex",
+                "DIVVY": "monthly dividend whose ~1.5% adjustment lands five "
+                "sessions LATE, after a naive job stopped looking",
+                "REVISED": "a bad print that sits in history until the exchange "
+                "busts the trade, then quietly disappears",
+            },
+            "adjustment": "raw | split | dividend | all (default all -- unlike "
+            "Alpaca's raw, and observable only on the tickers above)",
+            "ledger": ACTIONS_PATH,
+            "example": "/api/v1/alpaca/v2/stocks/bars?symbols=SPLITS"
+            "&timeframe=1Day&start=2026-06-01&end=2026-06-30&as_of=2026-07-09",
+        },
         "determinism": (
             "Identical requests return identical bars, forever, within a "
             "generation. Add &seed=<anything> for a different but equally "
@@ -315,6 +336,13 @@ def index():
                 "session, clock=real follows the NYSE calendar",
                 "example": "/api/v1/stream?symbols=CUCKOO,CRASH",
             },
+            {
+                "method": "GET",
+                "path": ACTIONS_PATH,
+                "purpose": "splits, dividends and busted trades, with the "
+                "announce/ex/process dates a reconciliation job needs",
+                "example": f"{ACTIONS_PATH}?symbols=SPLITS,DIVVY",
+            },
         ],
         "rate_limit": "60 req/min sustained, burst 120, per address, no key.",
     }
@@ -323,6 +351,7 @@ def index():
 for provider_router in providers.ROUTERS:
     app.include_router(provider_router)
 app.include_router(stream_router)
+app.include_router(actions_router)
 
 
 if __name__ == "__main__":

@@ -68,6 +68,25 @@ visible in any 30-day window:
 | `SPIKEY` | single-minute fat-finger wicks that instantly revert |
 | `PENNY` | ~$0.30 prices with four decimals — flushes float bugs |
 | `CHOPPY` | high volatility, zero net drift |
+| `SPLITS` | 2:1 split monthly — prior closes halve once it goes ex |
+| `DIVVY` | monthly dividend whose ~1.5% adjustment lands five sessions **late** |
+| `REVISED` | a bad print that sits in history until the exchange busts the trade |
+
+Real feeds *restate*: a split or a late dividend rewrites bars you already
+stored. `as_of` models that without giving up determinism — pin it and the
+bytes never change, omit it and history moves under you like a real vendor's:
+
+```bash
+# the same window, either side of a corporate action
+curl '.../v2/stocks/bars?symbols=SPLITS&timeframe=1Day&start=2026-06-01&end=2026-06-30&as_of=2026-07-09'
+curl '.../v2/stocks/bars?symbols=SPLITS&timeframe=1Day&start=2026-06-01&end=2026-06-30&as_of=2026-07-13'
+
+# ...and what changed, with the announce/ex/process dates
+curl 'https://cuckootrade.com/api/v1/corporate-actions?symbols=SPLITS,DIVVY'
+```
+
+If you keep bars in a database, that's the scenario your reconciliation job is
+supposed to catch — and now you can test it without waiting a month.
 
 Scenario tickers break the data. `scenario=` breaks the transport — dropped
 sockets, half-written bodies, requests that fail twice before they work:

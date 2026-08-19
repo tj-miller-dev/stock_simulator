@@ -63,7 +63,15 @@ the same symbol+day returns identical OHLCV through every surface.
   at $100), GAPPY (±5-15% overnight gaps), HALTS (missing minute bars),
   STALE (feed freezes: price repeats, v=0, timestamps keep advancing),
   SPIKEY (one-minute wicks), PENNY (~$0.30, 4 decimals), CHOPPY (high vol,
-  no drift).
+  no drift), SPLITS/DIVVY/REVISED (see restatement below).
+- Restatement: real feeds rewrite stored bars after corporate actions. as_of
+  (RFC-3339) answers as the feed would have on that date. Pin it and bytes are
+  frozen forever; omit it (default) and SPLITS (2:1 monthly), DIVVY (~1.5%
+  dividend adjusting 5 sessions late) and REVISED (bad print, later busted)
+  answer as of today. adjustment=raw|split|dividend|all, default all (Alpaca
+  defaults to raw; only these three tickers are affected).
+  GET /api/v1/corporate-actions?symbols=SPLITS,DIVVY lists announce/ex/process
+  dates. Requests without as_of on those tickers are never cached immutable.
 - Fault injection: add scenario= to break the transport on purpose. Nothing
   fires without it, and every fault is deterministic (same spec, same failure).
   Bars: flap:N (fail N times then succeed), status:CODE, slow:MS, truncate.

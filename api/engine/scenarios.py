@@ -141,6 +141,21 @@ SCENARIOS: dict[str, Scenario] = {
         personality=Personality(150.0, 0.15, 0.0, 9e6),
         spike_minutes=_spikey_minutes,
     ),
+    # Restatement tickers (engine/corporate_actions.py). Their signature is
+    # not a price shape at all -- it is that the same request answers
+    # differently once an action processes -- so they carry ordinary
+    # personalities and nothing else.
+    "SPLITS": Scenario(
+        personality=Personality(400.0, 0.22, 0.0, 11e6),
+    ),
+    "DIVVY": Scenario(
+        # Base price pinned to what corporate_actions quotes the cash dividend
+        # against, so the stated yield and the stated cash amount agree.
+        personality=Personality(120.0, 0.14, 0.0, 5e6),
+    ),
+    "REVISED": Scenario(
+        personality=Personality(55.0, 0.24, 0.0, 4e6),
+    ),
     "PENNY": Scenario(
         personality=Personality(0.31, 0.85, 0.0, 15e6),
     ),
