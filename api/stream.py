@@ -11,6 +11,11 @@ Heartbeat comments flow every HEARTBEAT_SECONDS regardless of data: the ALB
 kills idle connections (see the idle-timeout annotation in k8s/ingress.yaml),
 and a HALTS session or a closed market is silent by design.
 
+STALE is the opposite and the heartbeats matter more there, not less: its
+ticks keep arriving on schedule carrying a timestamp that has stopped
+advancing. Everything about the connection looks healthy, which is the whole
+point -- most clients check that a response arrived, not that it is current.
+
 Alpaca's wire protocol is WebSocket; this is deliberately not that (V2). SSE
 is curl-able, which makes it its own documentation.
 """
@@ -24,7 +29,8 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
-from engine import GENERATION, bars_range, demo_price, is_trading_day, parse_timeframe
+from engine import (GENERATION, bars_range, demo_clock, demo_price, is_trading_day,
+                    parse_timeframe)
 from engine.market_calendar import session_close_utc, session_open_utc
 
 HEARTBEAT_SECONDS = 15
@@ -54,9 +60,12 @@ async def _demo_events(symbols: list[str], seed: str, request: Request):
         if await request.is_disconnected():
             return
         second = int(time.time())
-        stamp = datetime.fromtimestamp(second, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         for symbol in symbols:
-            yield _event("tick", {"S": symbol, "p": demo_price(symbol, second, seed=seed),
+            # Per-symbol clock: STALE reports an instant that stops advancing
+            # while ticks, heartbeats and the socket itself all stay healthy.
+            at = int(demo_clock(symbol, second))
+            stamp = datetime.fromtimestamp(at, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            yield _event("tick", {"S": symbol, "p": demo_price(symbol, at, seed=seed),
                                   "t": stamp})
         if time.monotonic() - last_heartbeat >= HEARTBEAT_SECONDS:
             yield ": hb\n\n"

@@ -207,6 +207,7 @@ def index():
             "FLAT": "zero-range bars, constant price",
             "GAPPY": "large overnight gaps most days",
             "HALTS": "missing minute bars during intraday halt windows",
+            "STALE": "feed freezes: price repeats, volume zero, clock keeps moving",
             "SPIKEY": "single-minute fat-finger wicks",
             "PENNY": "sub-dollar prices, high volatility",
             "CHOPPY": "high volatility, zero net drift",

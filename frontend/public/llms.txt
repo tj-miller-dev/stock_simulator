@@ -61,6 +61,7 @@ the same symbol+day returns identical OHLCV through every surface.
 - Magic tickers (calendar-anchored, visible in any 30-day window):
   CRASH (~25% mid-month crash), MOON (monthly parabolic pump), FLAT (o=h=l=c
   at $100), GAPPY (±5-15% overnight gaps), HALTS (missing minute bars),
+  STALE (feed freezes: price repeats, v=0, timestamps keep advancing),
   SPIKEY (one-minute wicks), PENNY (~$0.30, 4 decimals), CHOPPY (high vol,
   no drift).
 - Errors: {"code": int, "message": str}; messages include the valid grammar

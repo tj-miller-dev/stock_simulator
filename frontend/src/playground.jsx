@@ -9,7 +9,7 @@ import './theme.css'
 initNav()
 initRibbon()
 
-const MAGIC = ['CRASH', 'MOON', 'FLAT', 'GAPPY', 'HALTS', 'SPIKEY', 'PENNY', 'CHOPPY']
+const MAGIC = ['CRASH', 'MOON', 'FLAT', 'GAPPY', 'HALTS', 'STALE', 'SPIKEY', 'PENNY', 'CHOPPY']
 const TIMEFRAMES = ['1Min', '5Min', '15Min', '30Min', '1Hour', '1Day', '1Week', '1Month']
 
 function csvEscape(value) {

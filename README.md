@@ -64,6 +64,7 @@ visible in any 30-day window:
 | `FLAT` | zero-range bars pinned at $100.00 — breaks naive chart scaling |
 | `GAPPY` | ±5–15% overnight gaps most days |
 | `HALTS` | minute bars go missing during intraday halt windows |
+| `STALE` | feed freezes mid-session: same price, zero volume, clock keeps moving |
 | `SPIKEY` | single-minute fat-finger wicks that instantly revert |
 | `PENNY` | ~$0.30 prices with four decimals — flushes float bugs |
 | `CHOPPY` | high volatility, zero net drift |

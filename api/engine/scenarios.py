@@ -23,6 +23,7 @@ class Scenario:
     day_multiplier: Callable[[date], float] | None = None
     gap_override: Callable[[date, str], float] | None = None   # -> log gap
     halted_minutes: Callable[[date], frozenset[int]] | None = None
+    stale_minutes: Callable[[date], frozenset[int]] | None = None
     spike_minutes: Callable[[date], dict[int, float]] | None = None  # minute -> signed wick fraction
 
 
@@ -80,6 +81,23 @@ def _halts_windows(d: date) -> frozenset[int]:
     return frozenset(window)
 
 
+def _stale_windows(d: date) -> frozenset[int]:
+    """HALTS's evil twin. Where a halt deletes bars, a stuck feed keeps
+    emitting the last print it saw: the bars are all there, the timestamps
+    advance, and nothing moves.
+
+    Minute 389 is never stale, which is deliberate: the session always closes
+    on a real print, so the day's volume is never zero and the catch-up bar
+    that reconciles the frozen stretch always lands inside the same session.
+    """
+    key = f"scenario:STALE:{d.isoformat()}"
+    if hash_float(f"{key}:on") >= 0.75:
+        return frozenset()  # a clean session, for contrast
+    start = 20 + int(hash_float(f"{key}:start") * 300)
+    length = 15 + int(hash_float(f"{key}:len") * 30)
+    return frozenset(range(start, min(389, start + length)))
+
+
 def _spikey_minutes(d: date) -> dict[int, float]:
     key = f"scenario:SPIKEY:{d.isoformat()}"
     spikes: dict[int, float] = {}
@@ -114,6 +132,10 @@ SCENARIOS: dict[str, Scenario] = {
     "HALTS": Scenario(
         personality=Personality(45.0, 0.30, 0.0, 6e6),
         halted_minutes=_halts_windows,
+    ),
+    "STALE": Scenario(
+        personality=Personality(85.0, 0.28, 0.0, 7e6),
+        stale_minutes=_stale_windows,
     ),
     "SPIKEY": Scenario(
         personality=Personality(150.0, 0.15, 0.0, 9e6),

@@ -275,6 +275,26 @@ def _day_arrays(symbol: str, d: date, seed: str):
     trades = np.maximum(1, np.rint(volumes / trade_size)).astype(np.int64)
     vwaps = (opens + highs + lows + closes) / 4.0
 
+    stale = scen.stale_minutes(d) if scen is not None and scen.stale_minutes else frozenset()
+    if stale:
+        # A stuck feed repeats its last print: flat bar, no trades. Timestamps
+        # still advance -- a bar's timestamp *is* its bucket, and freezing that
+        # would be malformed. The staleness shows up as v=0 against an
+        # unchanging price, and the first live minute afterwards carries the
+        # whole move as a catch-up gap.
+        # opens/closes are overlapping views of `path` (opens[i] is path[i] is
+        # closes[i-1]); copy before writing or freezing one bar corrupts its
+        # neighbour. Copies are made here only, so no other symbol pays.
+        opens, closes = opens.copy(), closes.copy()
+        frozen = float(opens[0])
+        for i in range(n_min):
+            if i in stale:
+                opens[i] = highs[i] = lows[i] = closes[i] = vwaps[i] = frozen
+                volumes[i] = 0
+                trades[i] = 0
+            else:
+                frozen = float(closes[i])
+
     halted = scen.halted_minutes(d) if scen is not None and scen.halted_minutes else frozenset()
     idx = np.arange(n_min)
     if halted:
@@ -330,7 +350,9 @@ def _aggregate(minutes: list[dict], t: datetime) -> dict | None:
         "c": minutes[-1]["c"],
         "v": volume,
         "n": sum(m["n"] for m in minutes),
-        "vw": sum(m["vw"] * m["v"] for m in minutes) / volume,
+        # A bucket sitting entirely inside a STALE window has no trades to
+        # weight by; the frozen price is the only honest answer.
+        "vw": (sum(m["vw"] * m["v"] for m in minutes) / volume) if volume else minutes[-1]["c"],
     }
 
 
@@ -347,7 +369,7 @@ def _aggregate_days(symbol: str, days: list[date], seed: str, t: datetime) -> di
         "c": summaries[-1][3],
         "v": volume,
         "n": sum(s[5] for s in summaries),
-        "vw": sum(s[6] for s in summaries) / volume,
+        "vw": (sum(s[6] for s in summaries) / volume) if volume else summaries[-1][3],
     }
 
 
@@ -525,6 +547,31 @@ _DEMO_OCTAVES = (  # (wavelength seconds, weight)
     (65536.0, 0.90),
     (262144.0, 1.35),
 )
+
+
+DEMO_STALE_PERIOD = 60    # seconds
+DEMO_STALE_FROM = 40      # ...stale for the last 20 of every minute
+
+
+def demo_clock(symbol: str, unix_second: float) -> float:
+    """The instant a symbol's demo feed believes it is.
+
+    Normally now. For STALE it sticks at the top of the stale window while the
+    wall clock keeps moving, so the quote's own timestamp goes stale -- the
+    failure the ticker exists to reproduce, and the one most clients never
+    check for because the connection stays perfectly healthy throughout.
+
+    Twenty seconds out of every minute, on a fixed schedule rather than a
+    hashed one: anyone watching the landing page should see it freeze without
+    having to wait, and a test should not have to hunt for the window.
+    """
+    scen = scenario_for(symbol)
+    if scen is None or scen.stale_minutes is None:
+        return unix_second
+    offset = unix_second % DEMO_STALE_PERIOD
+    if offset < DEMO_STALE_FROM:
+        return unix_second
+    return unix_second - offset + DEMO_STALE_FROM
 
 
 def demo_price(symbol: str, unix_second: float, *, seed: str = "") -> float:

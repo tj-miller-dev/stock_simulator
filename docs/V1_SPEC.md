@@ -90,6 +90,7 @@ view** (so demos and casual queries always show the goods).
 | `FLAT`   | Constant price; zero-range bars (`o=h=l=c`), token volume — breaks naive chart scaling |
 | `GAPPY`  | Large overnight gaps (±5–15%) most days, quiet intraday |
 | `HALTS`  | Recurring intraday halt windows: minute bars *absent* mid-session (Alpaca omits no-trade bars — mimic that) |
+| `STALE`  | Feed freezes mid-session: price repeats, `v=0`, timestamps still advance — `HALTS` inverted (bars all arrive, none mean anything) |
 | `SPIKEY` | Single-minute fat-finger wicks (~10% instantaneous spikes that immediately revert) |
 | `PENNY`  | Sub-dollar price (~$0.30), high relative volatility — flushes float/precision bugs |
 | `CHOPPY` | High volatility, zero net drift — mean-reversion torture test |
