@@ -45,6 +45,7 @@ from .market_calendar import (
     trading_days_of_year,
 )
 from .personality import Personality, personality
+from .corporate_actions import factors_for
 from .scenarios import Scenario, scenario_for
 
 GENERATION = 1
@@ -275,6 +276,26 @@ def _day_arrays(symbol: str, d: date, seed: str):
     trades = np.maximum(1, np.rint(volumes / trade_size)).astype(np.int64)
     vwaps = (opens + highs + lows + closes) / 4.0
 
+    stale = scen.stale_minutes(d) if scen is not None and scen.stale_minutes else frozenset()
+    if stale:
+        # A stuck feed repeats its last print: flat bar, no trades. Timestamps
+        # still advance -- a bar's timestamp *is* its bucket, and freezing that
+        # would be malformed. The staleness shows up as v=0 against an
+        # unchanging price, and the first live minute afterwards carries the
+        # whole move as a catch-up gap.
+        # opens/closes are overlapping views of `path` (opens[i] is path[i] is
+        # closes[i-1]); copy before writing or freezing one bar corrupts its
+        # neighbour. Copies are made here only, so no other symbol pays.
+        opens, closes = opens.copy(), closes.copy()
+        frozen = float(opens[0])
+        for i in range(n_min):
+            if i in stale:
+                opens[i] = highs[i] = lows[i] = closes[i] = vwaps[i] = frozen
+                volumes[i] = 0
+                trades[i] = 0
+            else:
+                frozen = float(closes[i])
+
     halted = scen.halted_minutes(d) if scen is not None and scen.halted_minutes else frozenset()
     idx = np.arange(n_min)
     if halted:
@@ -285,8 +306,15 @@ def _day_arrays(symbol: str, d: date, seed: str):
     return idx, opens, highs, lows, closes, volumes, trades, vwaps
 
 
-def _day_minute_bars(symbol: str, d: date, seed: str) -> list[dict]:
+def _day_minute_bars(symbol: str, d: date, seed: str, factors=None) -> list[dict]:
     idx, o, h, l, c, v, n, vw = _day_arrays(symbol, d, seed)
+    # One factor for the whole day, applied before anything aggregates: that
+    # is what keeps a week straddling an ex-date coherent with its own minutes
+    # (see corporate_actions.py).
+    pf, vf = factors(d) if factors is not None else (1.0, 1)
+    if pf != 1.0 or vf != 1:
+        o, h, l, c, vw = o * pf, h * pf, l * pf, c * pf, vw * pf
+        v = v * vf
     open_utc = session_open_utc(d)
     return [
         {
@@ -330,12 +358,31 @@ def _aggregate(minutes: list[dict], t: datetime) -> dict | None:
         "c": minutes[-1]["c"],
         "v": volume,
         "n": sum(m["n"] for m in minutes),
-        "vw": sum(m["vw"] * m["v"] for m in minutes) / volume,
+        # A bucket sitting entirely inside a STALE window has no trades to
+        # weight by; the frozen price is the only honest answer.
+        "vw": (sum(m["vw"] * m["v"] for m in minutes) / volume) if volume else minutes[-1]["c"],
     }
 
 
-def _aggregate_days(symbol: str, days: list[date], seed: str, t: datetime) -> dict | None:
-    summaries = [s for s in (_day_summary(symbol, d, seed) for d in days) if s is not None]
+def _adjust_summary(summary: tuple, pf: float, vf: int) -> tuple:
+    o, h, l, c, volume, trades, vw_num = summary
+    # Trade count survives untouched: a split changes how many shares a trade
+    # was for, never how many trades happened.
+    return (o * pf, h * pf, l * pf, c * pf, volume * vf, trades, vw_num * pf * vf)
+
+
+def _aggregate_days(symbol: str, days: list[date], seed: str, t: datetime,
+                    factors=None) -> dict | None:
+    summaries = []
+    for d in days:
+        summary = _day_summary(symbol, d, seed)
+        if summary is None:
+            continue
+        if factors is not None:
+            pf, vf = factors(d)
+            if pf != 1.0 or vf != 1:
+                summary = _adjust_summary(summary, pf, vf)
+        summaries.append(summary)
     if not summaries:
         return None
     volume = sum(s[4] for s in summaries)
@@ -347,7 +394,7 @@ def _aggregate_days(symbol: str, days: list[date], seed: str, t: datetime) -> di
         "c": summaries[-1][3],
         "v": volume,
         "n": sum(s[5] for s in summaries),
-        "vw": sum(s[6] for s in summaries) / volume,
+        "vw": (sum(s[6] for s in summaries) / volume) if volume else summaries[-1][3],
     }
 
 
@@ -368,8 +415,9 @@ def _format_bar(bar: dict) -> dict:
     }
 
 
-def _intraday_buckets(symbol: str, d: date, step: int, seed: str) -> list[dict]:
-    minutes = _day_minute_bars(symbol, d, seed)
+def _intraday_buckets(symbol: str, d: date, step: int, seed: str,
+                      factors=None) -> list[dict]:
+    minutes = _day_minute_bars(symbol, d, seed, factors)
     open_utc = session_open_utc(d)
     buckets: dict[int, list[dict]] = {}
     for m in minutes:
@@ -384,8 +432,8 @@ def _intraday_buckets(symbol: str, d: date, step: int, seed: str) -> list[dict]:
     return out
 
 
-def _daily_bar(symbol: str, d: date, seed: str) -> dict | None:
-    bar = _aggregate_days(symbol, [d], seed, midnight_et_utc(d))
+def _daily_bar(symbol: str, d: date, seed: str, factors=None) -> dict | None:
+    bar = _aggregate_days(symbol, [d], seed, midnight_et_utc(d), factors)
     if bar is not None:
         bar["_end"] = session_close_utc(d)
     return bar
@@ -419,12 +467,20 @@ def bars_range(
     max_bars: int = 10_000,
     descending: bool = False,
     now: datetime | None = None,
+    as_of: datetime | None = None,
+    adjustment: str = "all",
 ) -> tuple[list[dict], bool]:
     """Formatted bars for [start, end], oldest-first unless descending.
     Returns (bars, truncated). Work is bounded by max_bars: iteration walks
     day by day from the near end and stops as soon as the budget is spent,
-    so a huge window with a small limit stays cheap."""
+    so a huge window with a small limit stays cheap.
+
+    `as_of` answers "what would this feed have said on that date" -- the
+    second axis of the determinism contract. Pin it and the bytes are frozen
+    forever; leave it out and a restating symbol answers as of today, which is
+    not what it answered last month. See corporate_actions.py."""
     now = now or datetime.now(timezone.utc)
+    factors = factors_for(symbol, (as_of or now).date(), adjustment)
     end = min(end, now)
     start = max(start, datetime(EARLIEST_YEAR, 1, 1, tzinfo=timezone.utc))
     if start > end:
@@ -452,13 +508,13 @@ def bars_range(
     if timeframe.is_intraday:
         step = timeframe.minutes
         for d in _iter_days(start_d, end_d, descending):
-            day_bars = _intraday_buckets(symbol, d, step, seed)
+            day_bars = _intraday_buckets(symbol, d, step, seed, factors)
             for bar in reversed(day_bars) if descending else day_bars:
                 if not push(bar):
                     return bars, truncated
     elif timeframe.unit == "Day":
         for d in _iter_days(start_d, end_d, descending):
-            if not push(_daily_bar(symbol, d, seed)):
+            if not push(_daily_bar(symbol, d, seed, factors)):
                 return bars, truncated
     else:
         if timeframe.unit == "Week":
@@ -488,7 +544,8 @@ def bars_range(
                 # be a lie -- the client widens the window to get it.
                 continue
             period_days = list(_iter_days(first, last, False))
-            bar = _aggregate_days(symbol, period_days, seed, midnight_et_utc(anchor))
+            bar = _aggregate_days(symbol, period_days, seed, midnight_et_utc(anchor),
+                                  factors)
             if bar is not None:
                 bar["_end"] = session_close_utc(last)
             if not push(bar):
@@ -497,7 +554,9 @@ def bars_range(
     return bars, truncated
 
 
-def latest_bar(symbol: str, timeframe: Timeframe, *, seed: str = "", now: datetime | None = None) -> dict | None:
+def latest_bar(symbol: str, timeframe: Timeframe, *, seed: str = "",
+               now: datetime | None = None, as_of: datetime | None = None,
+               adjustment: str = "all") -> dict | None:
     now = now or datetime.now(timezone.utc)
     lookback = {
         "Min": timedelta(days=7),
@@ -507,7 +566,8 @@ def latest_bar(symbol: str, timeframe: Timeframe, *, seed: str = "", now: dateti
         "Month": timedelta(days=800),
     }[timeframe.unit]
     bars, _ = bars_range(
-        symbol, timeframe, now - lookback, now, seed=seed, max_bars=1, descending=True, now=now
+        symbol, timeframe, now - lookback, now, seed=seed, max_bars=1, descending=True,
+        now=now, as_of=as_of, adjustment=adjustment,
     )
     return bars[0] if bars else None
 
@@ -525,6 +585,31 @@ _DEMO_OCTAVES = (  # (wavelength seconds, weight)
     (65536.0, 0.90),
     (262144.0, 1.35),
 )
+
+
+DEMO_STALE_PERIOD = 60    # seconds
+DEMO_STALE_FROM = 40      # ...stale for the last 20 of every minute
+
+
+def demo_clock(symbol: str, unix_second: float) -> float:
+    """The instant a symbol's demo feed believes it is.
+
+    Normally now. For STALE it sticks at the top of the stale window while the
+    wall clock keeps moving, so the quote's own timestamp goes stale -- the
+    failure the ticker exists to reproduce, and the one most clients never
+    check for because the connection stays perfectly healthy throughout.
+
+    Twenty seconds out of every minute, on a fixed schedule rather than a
+    hashed one: anyone watching the landing page should see it freeze without
+    having to wait, and a test should not have to hunt for the window.
+    """
+    scen = scenario_for(symbol)
+    if scen is None or scen.stale_minutes is None:
+        return unix_second
+    offset = unix_second % DEMO_STALE_PERIOD
+    if offset < DEMO_STALE_FROM:
+        return unix_second
+    return unix_second - offset + DEMO_STALE_FROM
 
 
 def demo_price(symbol: str, unix_second: float, *, seed: str = "") -> float:

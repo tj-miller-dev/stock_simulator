@@ -20,6 +20,7 @@ is stuck. Error *shape* follows the provider being mimicked (Alpaca's
 {"status":"ERROR",...}).
 """
 
+import asyncio
 import logging
 import sys
 import time
@@ -27,13 +28,15 @@ import time
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 import providers
+from actions import ACTIONS_PATH, router as actions_router
 from common import EXAMPLE
+from effects import AttemptCounter, EffectError, has, parse_scenario, value_of
 from engine import GENERATION
 from ratelimit import TokenBucketLimiter, client_ip
-from stream import router as stream_router
+from stream import STREAM_PATH, router as stream_router
 
 DOCS_URL = "https://cuckootrade.com/docs"
 DISCLAIMER = (
@@ -61,6 +64,7 @@ app.add_middleware(
 )
 
 limiter = TokenBucketLimiter()
+attempts = AttemptCounter()
 
 # Own handler rather than uvicorn's access logger, which reports the socket peer
 # -- behind the ALB that's a load balancer ENI in 10.0.0.0/16, identical for every
@@ -127,6 +131,76 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     )
 
 
+def _native_fault(status: int, message: str) -> JSONResponse:
+    return JSONResponse(status_code=status, content={"code": status * 100000 + 10000,
+                                                     "message": message})
+
+
+async def _truncated(response):
+    """Declare the full Content-Length, then send half of it and hang up.
+
+    The client sees a body that ends mid-JSON with the length header insisting
+    there was more, which is what a connection dying in flight looks like from
+    the parser's side -- and the case naive code never has a branch for.
+    """
+    body = b"".join([chunk async for chunk in response.body_iterator])
+    half = body[: max(1, len(body) // 2)]
+
+    async def cut():
+        yield half
+
+    # Headers are copied wholesale, Content-Length included: the mismatch is
+    # the fault.
+    return StreamingResponse(cut(), status_code=response.status_code,
+                             headers=dict(response.headers))
+
+
+async def _serve(request: Request, call_next, path: str):
+    """Normal serving, plus scenario= transport faults where asked for.
+
+    The stream parses scenario= itself: its faults act on the event generator,
+    which is reachable only from inside stream.py.
+    """
+    raw = request.query_params.get("scenario")
+    if not raw or path == STREAM_PATH:
+        return await call_next(request)
+
+    render = providers.fault_renderer(path) or _native_fault
+    try:
+        effects = parse_scenario(raw, "http")
+    except EffectError as exc:
+        return render(400, str(exc))
+
+    delay = value_of(effects, "slow")
+    if delay:
+        await asyncio.sleep(delay / 1000.0)
+
+    status = value_of(effects, "status")
+    flap = value_of(effects, "flap")
+    if flap is not None:
+        # Keyed on the whole query, not just the path: two endpoints under test
+        # at once must not eat each other's attempts, and a retry -- which
+        # resends the request byte for byte -- still lands on the same budget.
+        if attempts.bump(f"{client_ip(request)}|{path}?{request.url.query}") <= flap:
+            status = status or 503
+        else:
+            status = None
+
+    if status is not None:
+        response = render(status, f"injected by scenario={raw} -- this failure was "
+                                  f"requested, the data behind it is fine")
+    else:
+        response = await call_next(request)
+        if has(effects, "truncate"):
+            response = await _truncated(response)
+
+    # A faulted response is a lie about a moment, never about the history.
+    # Nothing may cache it, least of all the immutable rule in common.py.
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Cuckoo-Scenario"] = raw
+    return response
+
+
 @app.middleware("http")
 async def cuckoo_middleware(request: Request, call_next):
     """Synthetic marking on every response, plus keyless per-IP rate limiting
@@ -148,12 +222,12 @@ async def cuckoo_middleware(request: Request, call_next):
                     },
                 )
             else:
-                response = await call_next(request)
+                response = await _serve(request, call_next, path)
             response.headers["RateLimit-Limit"] = str(int(limiter.capacity))
             response.headers["RateLimit-Remaining"] = str(max(0, remaining))
             response.headers["RateLimit-Reset"] = str(reset)
         else:
-            response = await call_next(request)
+            response = await _serve(request, call_next, path)
     except Exception:
         # Unhandled errors are turned into a 500 by Starlette's outermost
         # middleware, past this point -- log it here or the request that broke
@@ -196,6 +270,33 @@ def index():
             "swagger": "/api/docs",
             "llms": "https://cuckootrade.com/llms.txt",
         },
+        "restatement": {
+            "param": "as_of",
+            "purpose": "answer as the feed would have on that date (RFC-3339). "
+            "Real feeds restate -- a split or a late dividend rewrites bars you "
+            "already stored -- so `as_of` is the second axis of the determinism "
+            "guarantee: pin it and the bytes never change, omit it and restating "
+            "symbols answer as of today.",
+            "tickers": {
+                "SPLITS": "2:1 forward split monthly; prior closes halve when it goes ex",
+                "DIVVY": "monthly dividend whose ~1.5% adjustment lands five "
+                "sessions LATE, after a naive job stopped looking",
+                "REVISED": "a bad print that sits in history until the exchange "
+                "busts the trade, then quietly disappears",
+            },
+            "adjustment": "raw | split | dividend | all (default all -- unlike "
+            "Alpaca's raw, and observable only on the tickers above)",
+            "ledger": ACTIONS_PATH,
+            "how_to_tell_it_worked": (
+                "Every bar response carries X-Cuckoo-As-Of and X-Cuckoo-Restated "
+                "(e.g. '2 actions applied (SPLITS split ex 2026-07-10; ...)'). "
+                "'0 actions applied' means nothing rewrote these bars -- usually "
+                "the window sits after every ex-date, since an action only "
+                "rewrites bars dated before it."
+            ),
+            "example": "/api/v1/alpaca/v2/stocks/bars?symbols=SPLITS"
+            "&timeframe=1Day&start=2026-06-01&end=2026-06-30&as_of=2026-07-09",
+        },
         "determinism": (
             "Identical requests return identical bars, forever, within a "
             "generation. Add &seed=<anything> for a different but equally "
@@ -207,9 +308,37 @@ def index():
             "FLAT": "zero-range bars, constant price",
             "GAPPY": "large overnight gaps most days",
             "HALTS": "missing minute bars during intraday halt windows",
+            "STALE": "feed freezes: price repeats, volume zero, clock keeps moving",
             "SPIKEY": "single-minute fat-finger wicks",
             "PENNY": "sub-dollar prices, high volatility",
             "CHOPPY": "high volatility, zero net drift",
+            "SPLITS": "2:1 forward split monthly; prior closes restate -- see "
+            "`restatement` below",
+            "DIVVY": "monthly dividend whose ~1.5% adjustment lands five sessions "
+            "late -- see `restatement` below",
+            "REVISED": "a bad print history carries until the exchange busts it -- "
+            "see `restatement` below",
+        },
+        "fault_injection": {
+            "param": "scenario",
+            "purpose": "opt-in, deterministic transport faults -- nothing fires "
+            "unless you ask for it, and the same spec fails the same way every time",
+            "bars": {
+                "flap:N": "fail N times, then succeed (tests that retry logic recovers)",
+                "status:CODE": "return CODE in the called provider's error shape",
+                "slow:MS": "delay the response",
+                "truncate": "full Content-Length, half a body",
+            },
+            "stream": {
+                "drop:S": "close the socket at S seconds, mid-frame, no close event",
+                "garbage:N": "N unparseable frames among the good ones",
+                "silent:S": "no data and no heartbeats for S seconds",
+                "slow:MS": "delay between frames",
+                "truncate": "one frame cut mid-JSON, connection stays up",
+            },
+            "example": "/api/v1/alpaca/v2/stocks/bars?symbols=AAPL&scenario=flap:2",
+            "caveat": "flap counts attempts per pod; across replicas a flap:N can "
+            "burn up to N*replicas failures. Run the container locally for exact counts.",
         },
         "providers": providers.INDEX,
         "native_endpoints": [
@@ -220,6 +349,13 @@ def index():
                 "session, clock=real follows the NYSE calendar",
                 "example": "/api/v1/stream?symbols=CUCKOO,CRASH",
             },
+            {
+                "method": "GET",
+                "path": ACTIONS_PATH,
+                "purpose": "splits, dividends and busted trades, with the "
+                "announce/ex/process dates a reconciliation job needs",
+                "example": f"{ACTIONS_PATH}?symbols=SPLITS,DIVVY",
+            },
         ],
         "rate_limit": "60 req/min sustained, burst 120, per address, no key.",
     }
@@ -228,6 +364,7 @@ def index():
 for provider_router in providers.ROUTERS:
     app.include_router(provider_router)
 app.include_router(stream_router)
+app.include_router(actions_router)
 
 
 if __name__ == "__main__":

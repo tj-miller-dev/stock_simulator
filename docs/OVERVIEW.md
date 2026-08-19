@@ -58,6 +58,11 @@ The combination — no single leg is unique, the set is:
 - **Scenario control**: reserved "magic tickers" (`CRASH`, `MOON`, `HALTS`, …) produce
   scripted market behavior on demand — a flash crash in staging, today. No real-data
   provider can offer this at any price. This is the headline feature.
+- **Failure modes on demand** (V1.1): feeds that freeze while looking healthy
+  (`STALE`), history that restates after a corporate action (`as_of`,
+  `SPLITS`/`DIVVY`/`REVISED`), and opt-in transport faults (`scenario=drop:20s`,
+  `flap:2`). Same argument as the scenario tickers — nobody sells a stale feed or a
+  retroactive restatement at any price.
 - **Realistic enough**: trading calendar, per-symbol personality, volume that behaves.
   (But see the backtest warning below.)
 
@@ -90,6 +95,10 @@ The combination — no single leg is unique, the set is:
   /docs) in the terminal-dark theme. The acceptance test suite (`api/tests/`)
   includes alpaca-py pointed at the server via `url_override` and a cross-provider
   consistency test (same symbol+day ⇒ identical OHLCV through every surface).
+- **V1.1 in progress** (branch `add_new_failure_modes`, Aug 2026) — the failure-mode
+  release driven by launch-thread feedback: `STALE`, `scenario=` fault injection, and
+  `as_of` restatement with `engine/corporate_actions.py` plus
+  `/api/v1/corporate-actions`. Contract in [V1_1_SPEC.md](V1_1_SPEC.md).
 - **Repo: public** (github.com/tj-miller-dev/stock_simulator), MIT licensed, history
   verified clean of secrets. The API image also publishes to GHCR for self-hosters.
 
@@ -108,6 +117,9 @@ The combination — no single leg is unique, the set is:
 | Open source, MIT license, one repo | Adoption is the currency; CI users need readable source; the infra being public *is* the portfolio. Self-hosting is a feature, not lost revenue. |
 | `"synthetic": true` marking + backtest disclaimer everywhere | Ethical load-bearing wall (see "backtest trap" above). |
 | V2 named but frozen: fake broker | Design the V1 price engine as an internal queryable service so V2 can consume it, but build no order/position state now. |
+| `as_of` as a second determinism axis, not an exception to the first (Aug 2026) | Real feeds restate, so "same bytes forever" was a fidelity gap. A bar is now a pure function of (symbol, timestamp, generation, seed, **as_of**): pin `as_of` and history is immutable exactly as before (golden files, CI); omit it and restating tickers move under you like a real vendor's. Still no database — `as_of` is just another input. |
+| Transport faults ride the reserved `scenario=` param, never a magic ticker (Aug 2026) | Scripted tickers must never return malformed data (wire-compat promise), and a keyless endpoint that serves garbage to an agent who stumbled onto it is a brand problem. A param appears in the URL that produced the failure. Faults are deterministic so they can live in CI, unlike the random chaos tools. |
+| No quote/snapshot endpoints in V1.1 (Aug 2026) | `STALE` would read most naturally on a quote, but a new endpoint family is a real scope increase for one ticker's benefit. It expresses itself on bars, `bars/latest` and the stream instead. Revisit only if quotes are wanted for their own sake. |
 
 ## How this repo works (critical for anyone making changes)
 
@@ -126,5 +138,6 @@ The combination — no single leg is unique, the set is:
 
 ## Where to go next
 
-- Building or reviewing product work → [V1_SPEC.md](V1_SPEC.md)
+- Building or reviewing product work → [V1_SPEC.md](V1_SPEC.md), then
+  [V1_1_SPEC.md](V1_1_SPEC.md) for the failure-mode work
 - Operating, rebuilding, or tearing down infrastructure → [infrastructure runbook](QUICK_START.md)

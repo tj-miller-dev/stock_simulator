@@ -15,6 +15,7 @@ const SCENARIOS = [
   ['FLAT', 'Zero-range bars pinned at exactly $100.00 — breaks naive chart autoscaling.'],
   ['GAPPY', 'Overnight gaps of 5–15% most days, with quiet sessions between.'],
   ['HALTS', 'Minute bars go missing during intraday halt windows.'],
+  ['STALE', 'The feed freezes mid-session — same price, zero volume, while the clock keeps moving.'],
   ['SPIKEY', 'Single-minute wicks that spike and instantly revert.'],
   ['PENNY', 'Sub-dollar prices with four decimal places — surfaces precision bugs.'],
   ['CHOPPY', 'High volatility with zero net drift — stress-tests mean-reversion logic.'],

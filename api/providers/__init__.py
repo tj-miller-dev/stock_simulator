@@ -21,3 +21,16 @@ PROVIDERS = {
 
 ROUTERS = [module.router for module in PROVIDERS.values()]
 INDEX = {name: module.INDEX_ENTRY for name, module in PROVIDERS.items()}
+
+
+def fault_renderer(path: str):
+    """The error renderer belonging to whichever provider owns `path`.
+
+    An injected fault has to look like that provider's own failures or it
+    tests the wrong parser. Native paths get None; the caller falls back to
+    CuckooTrade's own shape.
+    """
+    for name, module in PROVIDERS.items():
+        if path.startswith(f"/api/v1/{name}/"):
+            return module.fault_response
+    return None

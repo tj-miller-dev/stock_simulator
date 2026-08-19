@@ -64,9 +64,47 @@ visible in any 30-day window:
 | `FLAT` | zero-range bars pinned at $100.00 — breaks naive chart scaling |
 | `GAPPY` | ±5–15% overnight gaps most days |
 | `HALTS` | minute bars go missing during intraday halt windows |
+| `STALE` | feed freezes mid-session: same price, zero volume, clock keeps moving |
 | `SPIKEY` | single-minute fat-finger wicks that instantly revert |
 | `PENNY` | ~$0.30 prices with four decimals — flushes float bugs |
 | `CHOPPY` | high volatility, zero net drift |
+| `SPLITS` | 2:1 split monthly — prior closes halve once it goes ex |
+| `DIVVY` | monthly dividend whose ~1.5% adjustment lands five sessions **late** |
+| `REVISED` | a bad print that sits in history until the exchange busts the trade |
+
+Real feeds *restate*: a split or a late dividend rewrites bars you already
+stored. `as_of` models that without giving up determinism — pin it and the
+bytes never change, omit it and history moves under you like a real vendor's:
+
+```bash
+# the same window, either side of a corporate action
+curl '.../v2/stocks/bars?symbols=SPLITS&timeframe=1Day&start=2026-06-01&end=2026-06-30&as_of=2026-07-09'
+curl '.../v2/stocks/bars?symbols=SPLITS&timeframe=1Day&start=2026-06-01&end=2026-06-30&as_of=2026-07-13'
+
+# ...and what changed, with the announce/ex/process dates
+curl 'https://cuckootrade.com/api/v1/corporate-actions?symbols=SPLITS,DIVVY'
+```
+
+If you keep bars in a database, that's the scenario your reconciliation job is
+supposed to catch — and now you can test it without waiting a month.
+
+Use `curl -i`: every bar response reports `X-Cuckoo-Restated: 2 actions applied
+(…)`, or `0 actions applied` when nothing rewrote those bars. An action only
+rewrites bars dated *before* its ex-date, so query a window that sits behind it.
+
+Scenario tickers break the data. `scenario=` breaks the transport — dropped
+sockets, half-written bodies, requests that fail twice before they work:
+
+```bash
+# fails twice, succeeds on the third attempt
+curl 'https://cuckootrade.com/api/v1/alpaca/v2/stocks/bars?symbols=AAPL&timeframe=1Day&scenario=flap:2'
+
+# the socket dies twenty seconds in, mid-frame, with no close event
+curl -N 'https://cuckootrade.com/api/v1/stream?symbols=CUCKOO&scenario=drop:20s'
+```
+
+Nothing fires unless you ask for it, and every fault is deterministic — which
+is the point. Random chaos makes flaky tests; these are meant to run in CI.
 
 There's also an SSE stream (`curl -N
 'https://cuckootrade.com/api/v1/stream?symbols=CUCKOO'`) with an always-open

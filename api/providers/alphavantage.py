@@ -51,6 +51,13 @@ def _error(message: str) -> JSONResponse:
     return JSONResponse({"Error Message": message})
 
 
+def fault_response(status: int, message: str) -> JSONResponse:
+    """An injected fault, wearing Alpha Vantage's error shape. The real API
+    reports errors as HTTP 200; here the caller named the status they wanted to
+    test against, so that wins over the mimicry."""
+    return JSONResponse(status_code=status, content={"Error Message": message})
+
+
 def _values(bar: dict) -> dict:
     return {
         "1. open": f"{bar['o']:.4f}",
