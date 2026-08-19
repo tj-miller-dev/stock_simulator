@@ -4,6 +4,15 @@ metadata:
   name: frontend
 spec:
   replicas: 2
+  strategy:
+    rollingUpdate:
+      # The node caps out at 17 pods and steady state is 16, so a surge pod
+      # has nowhere to land -- the rollout would block forever waiting for
+      # capacity that only frees up when the rollout finishes. Replace in
+      # place instead: one old pod goes, one new pod takes its slot, and the
+      # other replica serves throughout.
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app: frontend
