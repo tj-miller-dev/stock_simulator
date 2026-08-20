@@ -154,7 +154,7 @@ calendar).
 ### 3.2 `GET /api/v1/stream` — SSE (Cuckoo-native)
 
 Server-Sent Events stream of simulated ticks/bars. Not Alpaca's wire protocol (their
-WebSocket protocol is V2); this exists for the live hero chart, demo builders, and
+WebSocket protocol is V2); this exists for the live hero demonstration, demo builders, and
 agents — and it's curl-able, which is its own documentation.
 
 - Params: `symbols`, `seed`, and `clock`:
@@ -231,7 +231,8 @@ chart). The root becomes a real landing page:
 
 **Landing content must be present in the served HTML without JavaScript** — the SEO
 and LLM-citation goals die quietly otherwise. Recommended shape: static/prerendered
-page with the interactive pieces (hero chart, gallery, tabs) mounted as islands.
+page with the interactive pieces (hero demonstration, gallery, tabs) mounted as
+islands.
 Mechanism is implementation's choice; the requirement is view-source shows the pitch.
 
 ### 6.3 Aesthetic
