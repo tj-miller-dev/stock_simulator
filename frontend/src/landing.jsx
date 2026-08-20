@@ -2,12 +2,11 @@ import { StrictMode, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import LineChart from './chart/LineChart.jsx'
 import Sparkline from './chart/Sparkline.jsx'
-import { PUBLIC_BASE, barsUrl, fetchBars, isoDaysAgo } from './lib/api.js'
+import { initHeroDemo } from './heroDemo.js'
+import { barsUrl, fetchBars, isoDaysAgo } from './lib/api.js'
 import { initNav } from './nav.js'
 import { initRibbon } from './ribbon.js'
 import './theme.css'
-
-const HERO_TICKERS = ['CUCKOO', 'CRASH', 'MOON', 'GAPPY', 'HALTS', 'SPIKEY']
 
 const SCENARIOS = [
   ['CRASH', 'A ~25% crash mid-month with a slow recovery. Repeats every month.'],
@@ -20,64 +19,6 @@ const SCENARIOS = [
   ['PENNY', 'Sub-dollar prices with four decimal places — surfaces precision bugs.'],
   ['CHOPPY', 'High volatility with zero net drift — stress-tests mean-reversion logic.'],
 ]
-
-function CopyButton({ text }) {
-  const [done, setDone] = useState(false)
-  return (
-    <button
-      type="button"
-      className={`copy${done ? ' done' : ''}`}
-      onClick={() => {
-        navigator.clipboard?.writeText(text)
-        setDone(true)
-        setTimeout(() => setDone(false), 1400)
-      }}
-    >
-      {done ? 'copied' : 'copy'}
-    </button>
-  )
-}
-
-function HeroChart() {
-  const [ticker, setTicker] = useState('CUCKOO')
-  const [bars, setBars] = useState(null)
-  const [drawKey, setDrawKey] = useState(0)
-
-  const params = { symbols: ticker, timeframe: '1Day', start: isoDaysAgo(120) }
-  const curl = `curl '${barsUrl(params, PUBLIC_BASE)}'`
-
-  useEffect(() => {
-    let cancelled = false
-    fetchBars(params).then((data) => {
-      if (cancelled) return
-      setBars(data.bars[ticker] ?? [])
-      setDrawKey((k) => k + 1)
-    }).catch(() => !cancelled && setBars([]))
-    return () => { cancelled = true }
-  }, [ticker])
-
-  return (
-    <div className="panel">
-      <div className="panel-title">
-        <span className="dot live" />
-        <span>{ticker} · 1Day · last 120 days · synthetic</span>
-      </div>
-      <div className="scenario-row" role="group" aria-label="Pick a ticker">
-        {HERO_TICKERS.map((t) => (
-          <button key={t} type="button" className={`chip${t === ticker ? ' active' : ''}`} onClick={() => setTicker(t)}>
-            {t}
-          </button>
-        ))}
-      </div>
-      {bars == null ? (
-        <div className="chart-empty">loading…</div>
-      ) : (
-        <LineChart series={[{ name: ticker, color: 'var(--accent)', bars }]} drawKey={`${ticker}:${drawKey}`} />
-      )}
-      <pre className="curl-line"><span className="prompt">$</span> {curl} <CopyButton text={curl} /></pre>
-    </div>
-  )
-}
 
 function Gallery() {
   const [bars, setBars] = useState({})
@@ -164,8 +105,8 @@ function mount(id, node) {
 
 initNav()
 initRibbon()
+initHeroDemo()
 
-mount('island-hero', <HeroChart />)
 mount('island-gallery', <Gallery />)
 mount('island-proof', <DeterminismProof />)
 

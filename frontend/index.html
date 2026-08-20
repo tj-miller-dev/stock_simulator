@@ -62,35 +62,40 @@
     </header>
 
     <div class="shell">
-      <section class="hero">
-        <div>
-          <span class="eyebrow">Synthetic market data API</span>
-          <h1>Market data for everything <span class="accent">before</span> production.</h1>
-          <p class="sub">
-            CuckooTrade is a free, deterministic API that serves realistic synthetic
-            data over the wire formats of Alpaca, Alpha Vantage, and Polygon. Build
-            features, run CI, and give demos against stable market data — then
-            switch to your real provider by changing one line.
-          </p>
-          <div class="hero-ctas">
-            <a class="btn btn-primary" href="/playground">Open the playground</a>
-            <a class="btn btn-ghost" href="/docs">Read the docs</a>
+      <!-- The hero demonstration. The question and the command that answers it
+           sit together with nothing between them; the pitch follows underneath.
+           This markup is the first scenario rendered in full, and heroDemo.js
+           takes it over to cycle the rest — with scripts blocked it stays a
+           complete pitch on its own. -->
+      <section class="hero hero-demo">
+        <span class="eyebrow">Synthetic market data API</span>
+        <h1>What happens if<span class="ask-slot"><span class="ask" data-ask>you need a live feed on Saturday?</span></span></h1>
+        <div class="panel demo" data-demo>
+          <div class="panel-title">
+            <span class="dot"></span>
+            <span>the endpoint that answers it</span>
+            <div class="demo-nav" data-nav role="tablist" aria-label="Demonstration scenarios"></div>
           </div>
-          <ul class="hero-points">
-            <li>No API key, no signup</li>
-            <li>Free — 60 requests/min</li>
-            <li>Open source, MIT</li>
-          </ul>
+          <pre class="curl-line demo-cmd"><span class="prompt">$</span><span class="cmd">curl <span class="flag" data-flags>-N </span><span class="quo">'</span><span class="base">https://cuckootrade.com/api/v1/</span><span data-typed>stream?symbols=CUCKOO,CRASH</span><span class="caret" data-caret aria-hidden="true"></span><span class="quo">'</span></span><button type="button" class="copy" data-copy data-command="curl -N 'https://cuckootrade.com/api/v1/stream?symbols=CUCKOO,CRASH'">copy</button></pre>
+          <p class="demo-note" data-note><span class="arrow" aria-hidden="true">→</span> Server-sent events, curl-able, no key and no WebSocket client — and the synthetic session never closes.</p>
         </div>
-        <div>
-          <div id="island-hero">
-            <!-- static fallback: replaced by the live chart island -->
-            <div class="panel">
-              <div class="panel-title"><span class="dot"></span><span>CUCKOO · 1Day · synthetic</span></div>
-              <pre class="curl-line"><span class="prompt">$</span> curl 'https://cuckootrade.com/api/v1/alpaca/v2/stocks/bars?symbols=CUCKOO&amp;timeframe=1Day'</pre>
-            </div>
-          </div>
+
+        <p class="sub">
+          CuckooTrade is a free, deterministic market data API that speaks
+          Alpaca, Alpha Vantage, and Polygon — and serves the market conditions
+          you can't schedule and the failures no provider will sell you. Every
+          answer is one URL, with no key and no signup behind it.
+        </p>
+
+        <div class="hero-ctas">
+          <a class="btn btn-primary" href="/playground">Open the playground</a>
+          <a class="btn btn-ghost" href="/docs">Read the docs</a>
         </div>
+        <ul class="hero-points">
+          <li>No API key, no signup</li>
+          <li>Free — 60 requests/min</li>
+          <li>Open source, MIT</li>
+        </ul>
       </section>
 
       <div class="stats" aria-label="Key facts">
