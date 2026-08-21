@@ -1,4 +1,4 @@
-import { readdirSync } from 'node:fs'
+import { existsSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
@@ -34,12 +34,51 @@ function partials() {
   }
 }
 
+// Extensionless URLs in dev and preview, mirroring the nginx rules that serve
+// them in production (see nginx.conf).
+//
+// Vite's own fallback appends `.html` to an unknown path, which is why /docs
+// and /playground happened to work. /guides does not: there is no guides.html,
+// the page lives at guides/index.html, so the dev server 404'd on a URL that
+// production serves fine. Divergence between dev and prod routing is its own
+// bug -- a link is either correct in both or broken in both.
+//
+// Resolution is from disk rather than a hardcoded list so it stays true as
+// guides are added, and mismatched rules cannot drift apart.
+export function cleanUrl(pathname) {
+  if (pathname === '/' || pathname.includes('.')) return null   // root, or an asset
+  const rel = pathname.replace(/\/+$/, '')                      // tolerate a trailing slash
+  if (!rel) return null
+  for (const candidate of [`${rel}.html`, `${rel}/index.html`]) {
+    if (existsSync(resolve(here, `.${candidate}`))) return candidate
+  }
+  // An unknown guide lands on the guides index rather than the landing page,
+  // which is what nginx does with it too.
+  return rel.startsWith('/guides/') ? '/guides/index.html' : null
+}
+
+function cleanUrls() {
+  const middleware = (req, _res, next) => {
+    const [pathname, search] = req.url.split('?')
+    const target = cleanUrl(pathname)
+    if (target) req.url = search ? `${target}?${search}` : target
+    next()
+  }
+  return {
+    name: 'cuckoo-clean-urls',
+    // Registered directly (not via the returned-function form) so the rewrite
+    // lands before Vite's html and static handlers see the request.
+    configureServer: (server) => { server.middlewares.use(middleware) },
+    configurePreviewServer: (server) => { server.middlewares.use(middleware) },
+  }
+}
+
 // Multi-page build: the landing page keeps its pitch in static HTML (SEO and
 // LLM-citation quotability) with React islands layered on; playground, docs
 // and each guide are their own entries. nginx maps the clean URLs to the
-// corresponding .html files.
+// corresponding .html files in production; cleanUrls() does it in dev.
 export default defineConfig({
-  plugins: [react(), partials()],
+  plugins: [react(), partials(), cleanUrls()],
   build: {
     rollupOptions: {
       input: {
