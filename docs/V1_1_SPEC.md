@@ -1,6 +1,6 @@
 # CuckooTrade V1.1 — Failure Modes
 
-Status: **built** on branch `add_new_failure_modes` (Aug 2026), pending merge. Context in
+Status: **shipped** (Aug 2026) — built on `add_new_failure_modes`, merged and deployed. Context in
 [OVERVIEW.md](OVERVIEW.md); V1 build contract in [V1_SPEC.md](V1_SPEC.md), which this
 extends. Everything here is additive — no V1 behavior changes except where §3.4 says so
 explicitly.
@@ -180,7 +180,7 @@ across the announcement date:
 
 | Ticker | Behavior |
 |---|---|
-| `SPLITS` | Recurring 4:1 forward split. Prior closes ÷4 and volumes ×4 once the announcement date passes. Loud, obvious, the teaching example. |
+| `SPLITS` | Recurring 2:1 forward split. Prior closes ÷2 and volumes ×2 once the announcement date passes. Loud, obvious, the teaching example. |
 | `DIVVY` | A **late** dividend adjustment: the ex-date passes, the adjustment lands ~5 sessions later and retroactively shaves prior closes ~1–2%. Small enough to slip past a naive "did anything move more than 10%" check. This is the one that was actually asked for, and it's the cruel one. |
 | `REVISED` | A bad print — one session priced ~8% too high, carried in history until the exchange busts the trade, then quietly corrected. A vendor restatement with no corporate action to explain it. |
 
