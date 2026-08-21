@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#121412" />
+    <title>How to run market data tests in CI without API keys — CuckooTrade</title>
+    <meta name="description" content="Deterministic market data for unit tests and CI pipelines: no secrets, no rate limits, no failures on weekends. Copy-paste GitHub Actions, GitLab CI, and docker-compose setups." />
+    <link rel="canonical" href="https://cuckootrade.com/guides/market-data-in-ci-without-api-keys" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <meta name="robots" content="index,follow" />
+    <meta property="og:title" content="How to run market data tests in CI without API keys" />
+    <meta property="og:description" content="Deterministic market data for unit tests and CI pipelines: no secrets, no rate limits, no failures on weekends." />
+    <meta property="og:url" content="https://cuckootrade.com/guides/market-data-in-ci-without-api-keys" />
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="CuckooTrade" />
+    <meta property="og:image" content="https://cuckootrade.com/og.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="https://cuckootrade.com/og.png" />
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "TechArticle",
+          "headline": "How to run market data tests in CI without API keys",
+          "description": "Deterministic market data for unit tests and CI pipelines: no secrets, no rate limits, no failures on weekends. Copy-paste GitHub Actions, GitLab CI, and docker-compose setups.",
+          "url": "https://cuckootrade.com/guides/market-data-in-ci-without-api-keys",
+          "inLanguage": "en",
+          "proficiencyLevel": "Intermediate",
+          "keywords": "market data in CI, deterministic market data for unit tests, GitHub Actions market data, testing without API keys, mock market data CI pipeline",
+          "about": { "@type": "WebAPI", "name": "CuckooTrade", "url": "https://cuckootrade.com/" },
+          "publisher": { "@type": "Organization", "name": "CuckooTrade", "url": "https://cuckootrade.com/" },
+          "isPartOf": { "@type": "WebSite", "name": "CuckooTrade", "url": "https://cuckootrade.com/" }
+        },
+        {
+          "@type": "BreadcrumbList",
+          "itemListElement": [
+            { "@type": "ListItem", "position": 1, "name": "CuckooTrade", "item": "https://cuckootrade.com/" },
+            { "@type": "ListItem", "position": 2, "name": "Guides", "item": "https://cuckootrade.com/guides" },
+            { "@type": "ListItem", "position": 3, "name": "Market data in CI without API keys" }
+          ]
+        },
+        {
+          "@type": "FAQPage",
+          "mainEntity": [
+            {
+              "@type": "Question",
+              "name": "How do I test code that calls a market data API without storing an API key in CI?",
+              "acceptedAnswer": { "@type": "Answer", "text": "Point the client at CuckooTrade instead of the real provider. It requires no credentials at all, so there is no secret to store, rotate, or leak in a fork's pull request build. Either call the hosted endpoint at cuckootrade.com or run the container as a CI service for full isolation." }
+            },
+            {
+              "@type": "Question",
+              "name": "Why do market data tests fail on weekends?",
+              "acceptedAnswer": { "@type": "Answer", "text": "Real feeds have no bars for a day the market never opened, so a test that fetches recent data returns an empty result on Saturday and Sunday. CuckooTrade's data follows the real NYSE calendar while the API stays available, and only completed bars are served, so a request for a fixed historical window returns the same bars regardless of when the pipeline runs." }
+            },
+            {
+              "@type": "Question",
+              "name": "Is CuckooTrade rate limited in CI?",
+              "acceptedAnswer": { "@type": "Answer", "text": "The hosted service allows 60 requests per minute per address with a burst of 120. A shared CI runner pool can exceed that, so pipelines with heavy traffic should run the container as a service, which has no limit and no external dependency." }
+            },
+            {
+              "@type": "Question",
+              "name": "Is the data identical between the hosted service and a local container?",
+              "acceptedAnswer": { "@type": "Answer", "text": "Yes, for the same generation. The engine is stateless and every bar is a pure function of symbol, timestamp, generation, and seed, so a local instance serves byte-identical responses to cuckootrade.com." }
+            }
+          ]
+        }
+      ]
+    }
+    </script>
+  </head>
+  <body>
+    <!--@masthead-->
+
+    <div class="shell guide-shell">
+      <nav class="crumbs" aria-label="Breadcrumb">
+        <a href="/">Home</a><span aria-hidden="true">/</span>
+        <a href="/guides">Guides</a><span aria-hidden="true">/</span>
+        <span>Market data in CI without API keys</span>
+      </nav>
+
+      <div class="guide-head">
+        <span class="eyebrow">Guide</span>
+        <h1>How to run market data tests in CI without API keys</h1>
+        <p class="lede">
+          No secrets to store, no rate limit to trip, no red build on a Sunday,
+          and assertions that stay true next year. Copy-paste setups for GitHub
+          Actions, GitLab CI, and docker-compose.
+        </p>
+        <div class="guide-meta">
+          <span>CI/CD</span><span aria-hidden="true">&middot;</span>
+          <span>Docker</span><span aria-hidden="true">&middot;</span>
+          <span>10 minutes</span>
+        </div>
+      </div>
+
+      <article class="guide-body">
+        <section id="problem">
+          <h2>Four ways market data breaks a pipeline</h2>
+          <ul>
+            <li><b>Secrets.</b> A provider key has to exist in CI, which means it cannot run on pull requests from forks without either leaking the key or skipping the tests. Usually the tests get skipped.</li>
+            <li><b>Rate limits.</b> CI runners share egress addresses. Your per-key or per-IP quota is consumed by whichever build happened to run first, and the failure looks like a bug in your code.</li>
+            <li><b>The calendar.</b> A test that fetches &ldquo;the last five days&rdquo; returns four bars on a Tuesday and zero on a Sunday. Nightly builds discover this; developers do not.</li>
+            <li><b>Moving values.</b> Any assertion tighter than &ldquo;the response parsed&rdquo; expires, so most market data tests assert almost nothing.</li>
+          </ul>
+          <p>
+            A deterministic, keyless server removes all four, and it does it
+            without a mocking layer &mdash; the code under test still makes real
+            HTTP requests through its real client library.
+          </p>
+        </section>
+
+        <section id="hosted">
+          <h2>Option 1: point at the hosted endpoint</h2>
+          <p>
+            The fastest version. One environment variable, no services, no
+            secrets:
+          </p>
+          <figure class="snip">
+            <figcaption>yaml &mdash; .github/workflows/test.yml<button type="button" class="copy">copy</button></figcaption>
+            <pre>name: test
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      MARKET_DATA_URL: https://cuckootrade.com/api/v1/alpaca
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: pytest tests/</pre>
+          </figure>
+          <p>
+            Note what is <em>not</em> there: no <code>secrets.</code> reference,
+            so this workflow runs identically on a pull request from a fork.
+          </p>
+          <div class="note">
+            <b>When not to use this.</b> The hosted service allows 60
+            requests/minute per address with a burst of 120. A busy runner pool
+            shares addresses, and it is an external dependency your build now
+            has. For anything beyond a light test suite, use option 2.
+          </div>
+        </section>
+
+        <section id="service">
+          <h2>Option 2: run it as a CI service (recommended)</h2>
+          <p>
+            The container is stateless and starts in about a second.
+            Determinism means it serves byte-identical data to the hosted
+            service, so tests written against one work against the other:
+          </p>
+          <figure class="snip">
+            <figcaption>yaml &mdash; .github/workflows/test.yml<button type="button" class="copy">copy</button></figcaption>
+            <pre>name: test
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      market-data:
+        image: ghcr.io/tj-miller-dev/cuckootrade
+        ports: ["8000:8000"]
+    env:
+      MARKET_DATA_URL: http://localhost:8000/api/v1/alpaca
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+
+      # Wait for the service before the suite starts.
+      - run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8000/api/health &amp;&amp; break
+            sleep 1
+          done
+
+      - run: pytest tests/</pre>
+          </figure>
+          <p>No egress, no rate limit, no third-party uptime in your build.</p>
+
+          <h3>GitLab CI</h3>
+          <figure class="snip">
+            <figcaption>yaml &mdash; .gitlab-ci.yml<button type="button" class="copy">copy</button></figcaption>
+            <pre>test:
+  image: python:3.12
+  services:
+    - name: ghcr.io/tj-miller-dev/cuckootrade
+      alias: market-data
+  variables:
+    MARKET_DATA_URL: "http://market-data:8000/api/v1/alpaca"
+  script:
+    - pip install -r requirements.txt
+    - pytest tests/</pre>
+          </figure>
+
+          <h3>docker-compose, for local parity</h3>
+          <figure class="snip">
+            <figcaption>yaml &mdash; docker-compose.test.yml<button type="button" class="copy">copy</button></figcaption>
+            <pre>services:
+  market-data:
+    image: ghcr.io/tj-miller-dev/cuckootrade
+    ports: ["8000:8000"]
+
+  tests:
+    build: .
+    depends_on: [market-data]
+    environment:
+      MARKET_DATA_URL: http://market-data:8000/api/v1/alpaca
+    command: pytest tests/</pre>
+          </figure>
+        </section>
+
+        <section id="wiring">
+          <h2>Wiring it into the code under test</h2>
+          <p>
+            The goal is one environment variable and no test-only branches. For
+            <code>alpaca-py</code>:
+          </p>
+          <figure class="snip">
+            <figcaption>python &mdash; the only line that changes<button type="button" class="copy">copy</button></figcaption>
+            <pre>import os
+
+from alpaca.data.historical import StockHistoricalDataClient
+
+
+def market_data_client():
+    override = os.getenv("MARKET_DATA_URL")     # unset in production
+    return StockHistoricalDataClient(
+        api_key=os.getenv("ALPACA_KEY", "any"),
+        secret_key=os.getenv("ALPACA_SECRET", "any"),
+        **({"url_override": override} if override else {}),
+    )</pre>
+          </figure>
+          <p>
+            Production is the branch where the variable is unset, so the tested
+            path and the shipped path are the same code.
+          </p>
+        </section>
+
+        <section id="assertions">
+          <h2>Assertions that do not expire</h2>
+          <p>
+            This is what determinism actually buys. Every bar is a pure function
+            of symbol, timestamp, generation, and seed, so you can assert on
+            values rather than on shapes:
+          </p>
+          <figure class="snip">
+            <figcaption>python &mdash; tests/test_market_data.py<button type="button" class="copy">copy</button></figcaption>
+            <pre>import os
+
+import httpx
+import pytest
+
+BASE = os.environ["MARKET_DATA_URL"]
+WINDOW = {"timeframe": "1Day", "start": "2026-07-01", "end": "2026-07-31",
+          "generation": 1}          # pin the generator explicitly
+
+
+def bars(symbol, **extra):
+    r = httpx.get(f"{BASE}/v2/stocks/bars",
+                  params={"symbols": symbol, **WINDOW, **extra})
+    r.raise_for_status()
+    return r.json()["bars"][symbol]
+
+
+def test_window_is_reproducible():
+    assert bars("AAPL") == bars("AAPL")
+
+
+def test_calendar_is_respected():
+    from datetime import date
+    for bar in bars("AAPL"):
+        day = date.fromisoformat(bar["t"][:10])
+        assert day.weekday() &lt; 5                  # never a weekend
+    # July 3 2026 is the observed Independence Day holiday (the 4th is a Saturday)
+    assert "2026-07-03" not in [b["t"][:10] for b in bars("AAPL")]
+
+
+def test_seeds_give_independent_worlds():
+    assert bars("AAPL", seed="alpha") != bars("AAPL", seed="beta")
+
+
+@pytest.mark.parametrize("symbol", ["CRASH", "GAPPY", "FLAT", "PENNY"])
+def test_pipeline_survives_pathological_symbols(symbol):
+    assert len(bars(symbol)) &gt; 0        # then assert on your own handling</pre>
+          </figure>
+          <p>Two parameters are worth pinning deliberately in CI:</p>
+          <ul>
+            <li><code>generation=1</code> &mdash; the generator version. If the engine is ever improved, that becomes generation 2 and generation 1 keeps answering exactly as it does today. Pinning makes the guarantee explicit rather than implicit.</li>
+            <li><code>as_of=</code> &mdash; pins the restatement axis. Only needed if your tests touch <code>SPLITS</code>, <code>DIVVY</code>, or <code>REVISED</code>, whose history deliberately moves over time. Pin it and those become byte-stable too.</li>
+          </ul>
+          <div class="note">
+            <b>Use a fixed window, not a relative one.</b> <code>start</code>
+            and <code>end</code> as literal dates are reproducible; &ldquo;the
+            last 30 days&rdquo; is a moving target that will eventually cross a
+            weekend boundary and change the bar count.
+          </div>
+        </section>
+
+        <section id="failures">
+          <h2>Testing the failure paths too</h2>
+          <p>
+            Since the server is under your control in CI, the outage paths
+            become testable as ordinary tests &mdash; deterministically, so they
+            are safe to keep:
+          </p>
+          <figure class="snip">
+            <figcaption>python &mdash; failure paths in the same suite<button type="button" class="copy">copy</button></figcaption>
+            <pre>def test_client_surfaces_a_503():
+    r = httpx.get(f"{BASE}/v2/stocks/bars",
+                  params={"symbols": "AAPL", "scenario": "status:503"})
+    assert r.status_code == 503
+
+
+def test_client_times_out_rather_than_hanging():
+    with pytest.raises(httpx.ReadTimeout):
+        httpx.get(f"{BASE}/v2/stocks/bars",
+                  params={"symbols": "AAPL", "scenario": "slow:3000"},
+                  timeout=1.0)</pre>
+          </figure>
+          <p>
+            Running the container locally also gives an exact
+            <code>flap:n</code> count, which the multi-replica hosted service
+            cannot promise.
+            <a href="/guides/test-retry-logic-and-api-failures">The full fault-injection guide &rarr;</a>
+          </p>
+        </section>
+
+        <section id="caching">
+          <h2>One free optimisation</h2>
+          <p>
+            Any fully-specified request whose <code>end</code> is in the past is
+            immutable by construction, and says so:
+            <code>Cache-Control: public, max-age=31536000, immutable</code>. If
+            your CI has an HTTP cache, historical windows cost one request ever.
+            Requests carrying a fault are <code>no-store</code>, and requests
+            without <code>as_of</code> on a restating ticker are never marked
+            immutable &mdash; because for those, history is genuinely allowed to
+            move.
+          </p>
+        </section>
+      </article>
+
+      <div class="guide-next">
+        <h2>Next</h2>
+        <div class="guide-list">
+          <a class="guide-card" href="/guides/test-retry-logic-and-api-failures">
+            <em>Guide</em><b>Test retry logic and API failures</b>
+            <span>503s, hangs, truncated bodies, and an endpoint that fails twice then works.</span>
+          </a>
+          <a class="guide-card" href="/guides/mock-alpaca-api">
+            <em>Guide</em><b>Mock the Alpaca API</b>
+            <span>Point alpaca-py at a keyless mock server by changing one line.</span>
+          </a>
+          <a class="guide-card" href="/guides/test-trading-bot-market-crash">
+            <em>Guide</em><b>Test a trading bot against a market crash</b>
+            <span>Crashes, halts, gaps, and feeds that freeze while looking healthy.</span>
+          </a>
+          <a class="guide-card" href="/docs#self-host">
+            <em>Reference</em><b>Self-hosting</b>
+            <span>Running the container, and what determinism guarantees about it.</span>
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <!--@footer-->
+    <script type="module" src="/src/guide.js"></script>
+  </body>
+</html>

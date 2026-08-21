@@ -95,10 +95,16 @@ The combination — no single leg is unique, the set is:
   /docs) in the terminal-dark theme. The acceptance test suite (`api/tests/`)
   includes alpaca-py pointed at the server via `url_override` and a cross-provider
   consistency test (same symbol+day ⇒ identical OHLCV through every surface).
-- **V1.1 in progress** (branch `add_new_failure_modes`, Aug 2026) — the failure-mode
+- **V1.1 shipped** (Aug 2026) — the failure-mode
   release driven by launch-thread feedback: `STALE`, `scenario=` fault injection, and
   `as_of` restatement with `engine/corporate_actions.py` plus
   `/api/v1/corporate-actions`. Contract in [V1_1_SPEC.md](V1_1_SPEC.md).
+- **Discovery surface** (Aug 2026) — problem-shaped guides at `/guides` (one page per
+  real search: mocking each provider, forcing a crash, testing retries, CI without
+  keys), schema.org `FAQPage`/`SoftwareApplication` markup, a generated
+  `/llms-full.txt`, and one canonical product sentence reused across the site, the
+  README and `llms.txt`. Rationale and the remaining off-repo tasks are in
+  [DISTRIBUTION.md](DISTRIBUTION.md).
 - **Repo: public** (github.com/tj-miller-dev/stock_simulator), MIT licensed, history
   verified clean of secrets. The API image also publishes to GHCR for self-hosters.
 

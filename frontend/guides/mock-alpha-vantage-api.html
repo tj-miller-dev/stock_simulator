@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#121412" />
+    <title>How to mock the Alpha Vantage API (including intraday) — CuckooTrade</title>
+    <meta name="description" content="A free Alpha Vantage mock server with the real numbered-key JSON shape, 200-status errors, and intraday data that is premium on the real API. No key, no 25-request daily limit." />
+    <link rel="canonical" href="https://cuckootrade.com/guides/mock-alpha-vantage-api" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <meta name="robots" content="index,follow" />
+    <meta property="og:title" content="How to mock the Alpha Vantage API (including intraday)" />
+    <meta property="og:description" content="A free Alpha Vantage mock server with the real numbered-key JSON shape, 200-status errors, and intraday data that is premium on the real API." />
+    <meta property="og:url" content="https://cuckootrade.com/guides/mock-alpha-vantage-api" />
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="CuckooTrade" />
+    <meta property="og:image" content="https://cuckootrade.com/og.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="https://cuckootrade.com/og.png" />
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "TechArticle",
+          "headline": "How to mock the Alpha Vantage API (including intraday)",
+          "description": "A free Alpha Vantage mock server with the real numbered-key JSON shape, 200-status errors, and intraday data that is premium on the real API. No key, no daily request limit.",
+          "url": "https://cuckootrade.com/guides/mock-alpha-vantage-api",
+          "inLanguage": "en",
+          "proficiencyLevel": "Beginner",
+          "keywords": "mock Alpha Vantage API, Alpha Vantage testing, TIME_SERIES_INTRADAY free, Alpha Vantage rate limit, fake market data",
+          "about": { "@type": "WebAPI", "name": "CuckooTrade", "url": "https://cuckootrade.com/" },
+          "publisher": { "@type": "Organization", "name": "CuckooTrade", "url": "https://cuckootrade.com/" },
+          "isPartOf": { "@type": "WebSite", "name": "CuckooTrade", "url": "https://cuckootrade.com/" }
+        },
+        {
+          "@type": "BreadcrumbList",
+          "itemListElement": [
+            { "@type": "ListItem", "position": 1, "name": "CuckooTrade", "item": "https://cuckootrade.com/" },
+            { "@type": "ListItem", "position": 2, "name": "Guides", "item": "https://cuckootrade.com/guides" },
+            { "@type": "ListItem", "position": 3, "name": "Mock the Alpha Vantage API" }
+          ]
+        },
+        {
+          "@type": "FAQPage",
+          "mainEntity": [
+            {
+              "@type": "Question",
+              "name": "How do I test Alpha Vantage code without hitting the daily request limit?",
+              "acceptedAnswer": { "@type": "Answer", "text": "Point the client at https://cuckootrade.com/api/v1/alphavantage/query instead of www.alphavantage.co/query. It needs no key and allows 60 requests per minute, and the response shape - numbered string keys, newest-first maps, errors as HTTP 200 - matches the real API." }
+            },
+            {
+              "@type": "Question",
+              "name": "Is TIME_SERIES_INTRADAY available for free?",
+              "acceptedAnswer": { "@type": "Answer", "text": "On the real Alpha Vantage API intraday history is a premium feature. On CuckooTrade it is free and keyless, at 1min, 5min, 15min, 30min and 60min intervals, because the data is synthetic and costs nothing to generate." }
+            },
+            {
+              "@type": "Question",
+              "name": "Why does Alpha Vantage return errors with HTTP 200?",
+              "acceptedAnswer": { "@type": "Answer", "text": "That is the real API's behavior, and CuckooTrade mimics it deliberately: a failed request arrives as status 200 with an Error Message key in the body. Client code must sniff for that key rather than check the status code, and testing against a surface that reproduces the quirk is how you find code that does not." }
+            }
+          ]
+        }
+      ]
+    }
+    </script>
+  </head>
+  <body>
+    <!--@masthead-->
+
+    <div class="shell guide-shell">
+      <nav class="crumbs" aria-label="Breadcrumb">
+        <a href="/">Home</a><span aria-hidden="true">/</span>
+        <a href="/guides">Guides</a><span aria-hidden="true">/</span>
+        <span>Mock the Alpha Vantage API</span>
+      </nav>
+
+      <div class="guide-head">
+        <span class="eyebrow">Guide</span>
+        <h1>How to mock the Alpha Vantage API, including intraday</h1>
+        <p class="lede">
+          The same numbered-key JSON, the same newest-first maps, the same
+          errors-as-200 quirk &mdash; without a key, without the daily request
+          cap, and with intraday history that is a paid feature on the real
+          thing.
+        </p>
+        <div class="guide-meta">
+          <span>Any language</span><span aria-hidden="true">&middot;</span>
+          <span>REST</span><span aria-hidden="true">&middot;</span>
+          <span>6 minutes</span>
+        </div>
+      </div>
+
+      <article class="guide-body">
+        <section id="swap">
+          <h2>The base URL swap</h2>
+          <p>
+            Replace <code>https://www.alphavantage.co/query</code> with
+            <code>https://cuckootrade.com/api/v1/alphavantage/query</code>. The
+            <code>function</code>-switched interface is unchanged:
+          </p>
+          <figure class="snip">
+            <figcaption>shell &mdash; daily series, no key<button type="button" class="copy">copy</button></figcaption>
+            <pre>curl 'https://cuckootrade.com/api/v1/alphavantage/query?function=TIME_SERIES_DAILY&amp;symbol=IBM'</pre>
+          </figure>
+          <figure class="snip">
+            <figcaption>json &mdash; the familiar shape</figcaption>
+            <pre>{
+  "Meta Data": {
+    "1. Information": "Daily Prices (open, high, low, close) and Volumes",
+    "2. Symbol": "IBM",
+    "3. Last Refreshed": "2026-08-19",
+    "4. Output Size": "Compact",
+    "5. Time Zone": "US/Eastern"
+  },
+  "Time Series (Daily)": {
+    "2026-08-19": {
+      "1. open": "241.8300",
+      "2. high": "244.1900",
+      "3. low": "240.5500",
+      "4. close": "243.0700",
+      "5. volume": "3814227"
+    }
+  }
+}</pre>
+          </figure>
+          <div class="note">
+            <b>Everything is a string, and that is the point.</b> Prices and
+            volumes are quoted, keys are numbered, and series are maps keyed
+            newest-first rather than arrays. Parsers that assume JSON numbers
+            break here &mdash; which is a large part of why this surface is worth
+            testing against rather than around.
+          </div>
+        </section>
+
+        <section id="intraday">
+          <h2>Intraday, free</h2>
+          <p>
+            On the real API, intraday history sits behind a premium plan. Here
+            it is generated on demand, so it costs nothing:
+          </p>
+          <figure class="snip">
+            <figcaption>shell &mdash; five-minute bars<button type="button" class="copy">copy</button></figcaption>
+            <pre>curl 'https://cuckootrade.com/api/v1/alphavantage/query?function=TIME_SERIES_INTRADAY&amp;symbol=IBM&amp;interval=5min'
+
+# a specific month of history
+curl 'https://cuckootrade.com/api/v1/alphavantage/query?function=TIME_SERIES_INTRADAY&amp;symbol=IBM&amp;interval=1min&amp;month=2026-07&amp;outputsize=full'</pre>
+          </figure>
+          <table class="guide-table">
+            <tr><th>function</th><th>Notes</th></tr>
+            <tr><td>TIME_SERIES_INTRADAY</td><td><code>interval=</code> 1min, 5min, 15min, 30min, 60min. <code>month=YYYY-MM</code> selects a month.</td></tr>
+            <tr><td>TIME_SERIES_DAILY</td><td>Keyed <code>YYYY-MM-DD</code>.</td></tr>
+            <tr><td>TIME_SERIES_WEEKLY</td><td>Keyed by the last trading day of the week.</td></tr>
+            <tr><td>TIME_SERIES_MONTHLY</td><td>Keyed by the last trading day of the month.</td></tr>
+            <tr><td>GLOBAL_QUOTE</td><td>The single-quote shape.</td></tr>
+          </table>
+          <p>
+            <code>outputsize=compact</code> (100 rows, the default) and
+            <code>full</code> both behave as documented.
+            <code>apikey</code>, <code>adjusted</code> and
+            <code>extended_hours</code> are accepted and ignored.
+          </p>
+          <div class="note">
+            <b>Timestamp conventions differ per function, exactly as upstream.</b>
+            Intraday rows are keyed by the bar&rsquo;s <em>close</em> in
+            US/Eastern local time &mdash; the opposite convention to the Alpaca
+            surface&rsquo;s UTC open timestamps. If your code has an off-by-one-bar
+            bug, this is where it shows up.
+          </div>
+        </section>
+
+        <section id="errors">
+          <h2>Errors arrive as HTTP 200</h2>
+          <p>
+            The real API reports failures with a success status line, and its
+            client libraries sniff for the <code>Error Message</code> key rather
+            than checking the status. That is faithfully reproduced here,
+            because code that gets this wrong fails silently in production:
+          </p>
+          <figure class="snip">
+            <figcaption>python &mdash; check the key, not the status<button type="button" class="copy">copy</button></figcaption>
+            <pre>import requests
+
+r = requests.get("https://cuckootrade.com/api/v1/alphavantage/query",
+                 params={"function": "TIME_SERIES_DAILY",
+                         "symbol": "IBM"}).json()
+
+# Errors arrive as 200. r.raise_for_status() would never fire.
+if "Error Message" in r:
+    raise SystemExit(r["Error Message"])
+
+series = r["Time Series (Daily)"]
+for day, ohlcv in list(series.items())[:5]:      # newest first
+    print(day, float(ohlcv["4. close"]))         # values are strings</pre>
+          </figure>
+          <p>
+            The one deliberate exception is
+            <code>scenario=status:503</code>: you explicitly asked for a status
+            code, so the request wins over the mimicry. That gives you both
+            behaviors to test against.
+          </p>
+        </section>
+
+        <section id="scenarios">
+          <h2>Scenario tickers and fault injection</h2>
+          <p>
+            All three provider surfaces read from the same deterministic engine,
+            so scenario tickers work here identically &mdash; only the wire
+            format differs:
+          </p>
+          <figure class="snip">
+            <figcaption>shell &mdash; a crash, in Alpha Vantage&rsquo;s format<button type="button" class="copy">copy</button></figcaption>
+            <pre>curl 'https://cuckootrade.com/api/v1/alphavantage/query?function=TIME_SERIES_DAILY&amp;symbol=CRASH'
+
+# and a transport that fails twice before it works
+curl -i 'https://cuckootrade.com/api/v1/alphavantage/query?function=TIME_SERIES_DAILY&amp;symbol=IBM&amp;scenario=flap:2'</pre>
+          </figure>
+          <p>
+            <a href="/guides/test-trading-bot-market-crash">The full scenario ticker catalogue &rarr;</a>
+          </p>
+        </section>
+
+        <section id="deviations">
+          <h2>Deviations, stated plainly</h2>
+          <ul>
+            <li><b>Completed bars only.</b> There is no partial current day, week, or month row &mdash; determinism requires it.</li>
+            <li><b>Regular session only.</b> 09:30&ndash;16:00 ET; extended hours are not modeled.</li>
+            <li><b>No rate limit worth planning around.</b> 60 requests/minute per address rather than the real API&rsquo;s daily cap.</li>
+            <li><b>Fundamentals, FX, and crypto functions</b> are not implemented. Time series and <code>GLOBAL_QUOTE</code> are.</li>
+          </ul>
+          <div class="disclaimer">
+            <b>All data is synthetic</b> and every response says so via
+            <code>X-Cuckoo-Synthetic: true</code>. For exercising code paths, not
+            for validating trading strategies.
+          </div>
+        </section>
+      </article>
+
+      <div class="guide-next">
+        <h2>Next</h2>
+        <div class="guide-list">
+          <a class="guide-card" href="/guides/mock-polygon-api">
+            <em>Guide</em><b>Mock the Polygon.io API</b>
+            <span>Aggregates, cursor pagination, and deterministic request_id values.</span>
+          </a>
+          <a class="guide-card" href="/guides/mock-alpaca-api">
+            <em>Guide</em><b>Mock the Alpaca API</b>
+            <span>Point alpaca-py at a keyless mock server by changing one line.</span>
+          </a>
+          <a class="guide-card" href="/guides/market-data-in-ci-without-api-keys">
+            <em>Guide</em><b>Run market data tests in CI without API keys</b>
+            <span>No secrets, no rate limits, no weekend failures.</span>
+          </a>
+          <a class="guide-card" href="/docs#alphavantage">
+            <em>Reference</em><b>Alpha Vantage endpoint documentation</b>
+            <span>Every function, interval, and shape detail.</span>
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <!--@footer-->
+    <script type="module" src="/src/guide.js"></script>
+  </body>
+</html>
