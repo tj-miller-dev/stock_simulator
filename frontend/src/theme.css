@@ -443,6 +443,14 @@ button.copy.done { color: var(--good); border-color: var(--good); }
   color: var(--ink-3);
 }
 .headers-pre .hl { color: var(--accent); }
+/* Same panel, reused by the fault-injection section to show commands rather
+   than headers: a shell prompt, the interesting part, and a muted result. */
+.headers-pre .prompt { color: var(--good); }
+.headers-pre .dim { font-style: italic; }
+
+/* A "read more" link trailing a section that ends in a list or an island,
+   where there is no copyblock paragraph to hang it off. */
+.more-link-row { margin: 22px 0 0; }
 
 /* ---- disclaimer (docs) ---- */
 .disclaimer {
