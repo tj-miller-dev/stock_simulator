@@ -6,14 +6,14 @@
     <meta name="color-scheme" content="dark" />
     <meta name="theme-color" content="#121412" />
     <title>CuckooTrade — Market data for everything before production</title>
-    <meta name="description" content="A free, deterministic market data API serving openly synthetic data over the wire formats of Alpaca, Alpha Vantage, and Polygon. No API key, no signup. Build, test, and demo against stable data, then switch to your real provider by changing one line." />
+    <meta name="description" content="CuckooTrade is a free, deterministic synthetic market data API for building and testing trading software. Alpaca, Alpha Vantage, and Polygon compatible — no key, no signup. Programmable market anomalies and deterministic fault injection for development, CI, and demos." />
     <link rel="canonical" href="https://cuckootrade.com/" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <meta property="og:title" content="CuckooTrade — Market data for everything before production" />
-    <meta property="og:description" content="Free, deterministic synthetic market data speaking Alpaca, Alpha Vantage, and Polygon wire formats. No key, no signup. Scenario tickers like CRASH reproduce a flash crash on demand." />
+    <meta property="og:description" content="CuckooTrade is a free, deterministic synthetic market data API for building and testing trading software. Alpaca, Alpha Vantage, and Polygon compatible — no key, no signup. Scenario tickers like CRASH reproduce a flash crash on demand." />
     <meta property="og:url" content="https://cuckootrade.com/" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="CuckooTrade" />
@@ -23,43 +23,100 @@
     <meta property="og:image:alt" content="CuckooTrade — free deterministic synthetic market data API, no key, no signup." />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="CuckooTrade — Market data for everything before production" />
-    <meta name="twitter:description" content="Free, deterministic synthetic market data speaking Alpaca, Alpha Vantage, and Polygon wire formats. No key, no signup." />
+    <meta name="twitter:description" content="CuckooTrade is a free, deterministic synthetic market data API for building and testing trading software. Alpaca, Alpha Vantage, and Polygon compatible — no key, no signup." />
     <meta name="twitter:image" content="https://cuckootrade.com/og.png" />
     <script type="application/ld+json">
     {
       "@context": "https://schema.org",
-      "@type": "WebAPI",
-      "name": "CuckooTrade",
-      "description": "Free, deterministic synthetic market data API for development, CI pipelines, demos, and teaching. Wire-compatible with Alpaca, Alpha Vantage, and Polygon. No API key required. All data is synthetic.",
-      "url": "https://cuckootrade.com/",
-      "documentation": "https://cuckootrade.com/docs",
-      "termsOfService": "https://cuckootrade.com/docs#disclaimer",
-      "provider": { "@type": "Person", "name": "tj-miller-dev" }
+      "@graph": [
+        {
+          "@type": "WebAPI",
+          "@id": "https://cuckootrade.com/#api",
+          "name": "CuckooTrade",
+          "alternateName": "CuckooTrade Market Data API",
+          "description": "CuckooTrade is a free, deterministic synthetic market data API for building and testing trading software, with Alpaca-, Polygon-, and Alpha Vantage-compatible endpoints, programmable market anomalies, and deterministic fault injection. No API key, no signup.",
+          "url": "https://cuckootrade.com/",
+          "documentation": "https://cuckootrade.com/docs",
+          "termsOfService": "https://cuckootrade.com/docs#disclaimer",
+          "license": "https://opensource.org/licenses/MIT",
+          "provider": { "@type": "Person", "name": "tj-miller-dev", "url": "https://github.com/tj-miller-dev" },
+          "featureList": [
+            "No API key and no signup - the first request works from curl, CI, or a coding agent",
+            "Deterministic: identical requests return identical bytes, permanently",
+            "Wire-compatible with Alpaca, Polygon, and Alpha Vantage via a base-URL swap",
+            "Scenario tickers (CRASH, HALTS, STALE, GAPPY, FLAT, PENNY, SPIKEY, CHOPPY, MOON) for programmable market anomalies",
+            "Deterministic transport fault injection via scenario= (flap, status, slow, truncate, drop, garbage, silent)",
+            "as_of restatement modelling corporate actions that rewrite stored history",
+            "Server-Sent Events stream with an always-open synthetic session",
+            "Self-hostable as a stateless MIT-licensed container"
+          ]
+        },
+        {
+          "@type": "SoftwareApplication",
+          "name": "CuckooTrade",
+          "applicationCategory": "DeveloperApplication",
+          "operatingSystem": "Any",
+          "url": "https://cuckootrade.com/",
+          "downloadUrl": "https://github.com/tj-miller-dev/stock_simulator",
+          "softwareHelp": "https://cuckootrade.com/docs",
+          "license": "https://opensource.org/licenses/MIT",
+          "description": "A free, deterministic synthetic market data API for building and testing trading software. Alpaca, Alpha Vantage, and Polygon compatible, with no key and no signup.",
+          "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+        },
+        {
+          "@type": "WebSite",
+          "@id": "https://cuckootrade.com/#website",
+          "name": "CuckooTrade",
+          "url": "https://cuckootrade.com/",
+          "inLanguage": "en",
+          "publisher": { "@type": "Person", "name": "tj-miller-dev" }
+        },
+        {
+          "@type": "FAQPage",
+          "mainEntity": [
+            {
+              "@type": "Question",
+              "name": "What is CuckooTrade?",
+              "acceptedAnswer": { "@type": "Answer", "text": "CuckooTrade is a free, deterministic synthetic market data API for building and testing trading software. It serves openly fake data over the wire formats of Alpaca, Alpha Vantage, and Polygon, so an existing client works by changing only its base URL. There is no API key and no signup." }
+            },
+            {
+              "@type": "Question",
+              "name": "Do I need an API key or an account?",
+              "acceptedAnswer": { "@type": "Answer", "text": "No. There is no key, no signup, and no billing. Requests are rate limited by address at 60 per minute sustained with a burst of 120. Keylessness is deliberate: CI pipelines and coding agents cannot sign up for accounts." }
+            },
+            {
+              "@type": "Question",
+              "name": "What does deterministic mean here?",
+              "acceptedAnswer": { "@type": "Answer", "text": "Every bar is a pure function of symbol, timestamp, generation, seed, and as_of. There is no database - data is computed, not stored - so identical requests return identical bytes permanently. That makes committed test fixtures stay valid and CI runs reproducible. If the generator is ever improved, that becomes a new generation and the old one stays queryable forever." }
+            },
+            {
+              "@type": "Question",
+              "name": "What are scenario tickers?",
+              "acceptedAnswer": { "@type": "Answer", "text": "Reserved ticker symbols that return scripted market behavior on demand: CRASH produces a roughly 25% drawdown, HALTS omits minute bars mid-session, STALE freezes the feed while timestamps keep advancing, GAPPY produces large overnight gaps, FLAT returns zero-range bars, PENNY returns sub-dollar prices with four decimals. Each is anchored to the calendar so its signature appears in any 30-day window. No real data provider can offer this at any price." }
+            },
+            {
+              "@type": "Question",
+              "name": "Can I make the API fail on purpose to test error handling?",
+              "acceptedAnswer": { "@type": "Answer", "text": "Yes. Add scenario= to any request: flap:2 fails twice then succeeds, status:503 returns that status in the provider's own error shape, slow:2000 delays the response, truncate cuts the body short, and on the stream drop:20s kills the socket mid-frame. Nothing fires without the parameter, and every fault is deterministic, so the resulting tests are not flaky and can live in CI." }
+            },
+            {
+              "@type": "Question",
+              "name": "Can I use CuckooTrade to backtest a trading strategy?",
+              "acceptedAnswer": { "@type": "Answer", "text": "No, and this is the one way the tool can genuinely mislead someone. The data is synthetic, so a strategy that profits against it has learned the generator rather than the market. CuckooTrade exists to exercise code paths - parsing, pagination, retries, charting, alerting - not to validate strategies. Every response is marked X-Cuckoo-Synthetic: true." }
+            },
+            {
+              "@type": "Question",
+              "name": "Can I self-host it?",
+              "acceptedAnswer": { "@type": "Answer", "text": "Yes. The engine is stateless and MIT licensed, and the container image is published to GHCR: docker run -p 8000:8000 ghcr.io/tj-miller-dev/cuckootrade. Because the data is computed rather than stored, a local instance serves byte-identical responses to cuckootrade.com for the same generation." }
+            }
+          ]
+        }
+      ]
     }
     </script>
   </head>
   <body>
-    <header class="masthead">
-      <div class="masthead-inner">
-        <span class="wordmark" aria-label="CuckooTrade">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <!-- minimal line-drawn cuckoo -->
-            <path d="M4 16c2-6 7-9 12-8l4-2-2 4c1 5-2 9-8 9l-4 3 1-4c-2-1-3-1-3-2z"
-              stroke="var(--accent)" stroke-width="1.5" stroke-linejoin="round"/>
-            <circle cx="14.5" cy="9.5" r="0.9" fill="var(--accent)"/>
-          </svg>
-          CUCKOO<b>TRADE</b>
-        </span>
-        <nav>
-          <a href="/playground">Playground</a>
-          <a href="/docs">Docs</a>
-          <a href="/api/docs">API Docs</a>
-          <a href="https://github.com/tj-miller-dev/stock_simulator">GitHub</a>
-          <a class="btn btn-primary btn-sm" href="/docs#quickstart">Get started</a>
-        </nav>
-      </div>
-      <div id="ticker-ribbon" class="ribbon" aria-label="Live synthetic prices"></div>
-    </header>
+    <!--@masthead-->
 
     <div class="shell">
       <!-- The hero demonstration. The question and the command that answers it
@@ -221,6 +278,44 @@
             <li><b>$CHOPPY</b> — high volatility with zero net drift.</li>
           </ul>
         </div>
+        <p class="more-link-row">
+          <a class="more-link" href="/guides/test-trading-bot-market-crash">Testing a bot against a crash, halt, or gap →</a>
+        </p>
+      </section>
+
+      <section id="faults" class="split">
+        <div class="copyblock">
+          <span class="eyebrow">Fault injection</span>
+          <h2>And the failures no provider will sell you</h2>
+          <p>
+            Scenario tickers break the data. <code>scenario=</code> breaks the
+            transport: a 503 on demand, a response that hangs, a body that stops
+            halfway through, a socket that dies mid-frame. The one that matters
+            most is <code>flap:2</code> — the endpoint fails twice and then
+            works, so your retry and backoff have something to actually recover
+            from.
+          </p>
+          <p>
+            Nothing fires without the parameter, and every fault is
+            deterministic: <code>drop:20s</code> drops at twenty seconds, every
+            time, for everyone. Random chaos makes flaky tests. These are built
+            to live in CI.
+          </p>
+          <p><a class="more-link" href="/guides/test-retry-logic-and-api-failures">How to test retry logic →</a></p>
+        </div>
+        <div>
+          <div class="panel">
+            <div class="panel-title"><span class="dot"></span><span>break it on purpose</span></div>
+            <pre class="headers-pre"><span class="prompt">$</span> curl '<span class="hl">…/bars?symbols=AAPL&amp;scenario=flap:2</span>'
+<span class="dim">fails twice, then serves normally</span>
+
+<span class="prompt">$</span> curl '<span class="hl">…/bars?symbols=AAPL&amp;scenario=status:503</span>'
+<span class="dim">that status, in the provider's error shape</span>
+
+<span class="prompt">$</span> curl -N '<span class="hl">…/stream?symbols=CUCKOO&amp;scenario=drop:20s</span>'
+<span class="dim">socket dies at 20s, mid-frame, no close event</span></pre>
+          </div>
+        </div>
       </section>
 
       <section id="determinism" class="split flip">
@@ -340,41 +435,7 @@ cache-control: public, max-age=31536000, immutable</pre>
       </div>
     </div>
 
-    <footer>
-      <div class="foot-inner">
-        <div class="foot-grid">
-          <div class="foot-brand">
-            <span class="wordmark">CUCKOO<b>TRADE</b></span>
-            <p>A free, deterministic, Alpaca-compatible market data API. Openly
-            synthetic — built for development, CI, demos, and teaching.</p>
-          </div>
-          <div class="foot-col">
-            <h4>Product</h4>
-            <a href="/playground">Playground</a>
-            <a href="/docs">Documentation</a>
-            <a href="/api">API index</a>
-            <a href="/api/docs">OpenAPI docs</a>
-          </div>
-          <div class="foot-col">
-            <h4>Developers</h4>
-            <a href="https://github.com/tj-miller-dev/stock_simulator">GitHub</a>
-            <a href="/api/openapi.json">openapi.json</a>
-            <a href="/llms.txt">llms.txt</a>
-            <a href="/docs#self-host">Self-hosting</a>
-          </div>
-          <div class="foot-col">
-            <h4>Trust</h4>
-            <a href="/docs#disclaimer">Synthetic-data disclosure</a>
-            <a href="/docs#limits">Rate limits</a>
-            <a href="https://github.com/tj-miller-dev/stock_simulator/blob/main/LICENSE">MIT license</a>
-          </div>
-        </div>
-        <div class="fine">
-          <p>© 2026 CuckooTrade. Open source — the API, the frontend, and the infrastructure that runs them.</p>
-          <p>All data on this site is synthetic. Not market data, not investment advice.</p>
-        </div>
-      </div>
-    </footer>
+    <!--@footer-->
     <script type="module" src="/src/landing.jsx"></script>
   </body>
 </html>

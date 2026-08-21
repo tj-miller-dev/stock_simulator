@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#121412" />
+    <title>How to mock the Alpaca API for local development and tests — CuckooTrade</title>
+    <meta name="description" content="Point alpaca-py at a free mock Alpaca API by changing one line. No API key, no paper account, deterministic bars that work in CI and on weekends." />
+    <link rel="canonical" href="https://cuckootrade.com/guides/mock-alpaca-api" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <meta name="robots" content="index,follow" />
+    <meta property="og:title" content="How to mock the Alpaca API for local development and tests" />
+    <meta property="og:description" content="Point alpaca-py at a free mock Alpaca API by changing one line. No API key, no paper account, deterministic bars that work in CI and on weekends." />
+    <meta property="og:url" content="https://cuckootrade.com/guides/mock-alpaca-api" />
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="CuckooTrade" />
+    <meta property="og:image" content="https://cuckootrade.com/og.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="https://cuckootrade.com/og.png" />
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "TechArticle",
+          "headline": "How to mock the Alpaca API for local development and tests",
+          "description": "Point alpaca-py at a free mock Alpaca API by changing one line. No API key, no paper account, deterministic bars that work in CI and on weekends.",
+          "url": "https://cuckootrade.com/guides/mock-alpaca-api",
+          "inLanguage": "en",
+          "proficiencyLevel": "Beginner",
+          "keywords": "mock Alpaca API, Alpaca API mock server, alpaca-py testing, fake market data, market data for CI",
+          "about": { "@type": "WebAPI", "name": "CuckooTrade", "url": "https://cuckootrade.com/" },
+          "publisher": { "@type": "Organization", "name": "CuckooTrade", "url": "https://cuckootrade.com/" },
+          "isPartOf": { "@type": "WebSite", "name": "CuckooTrade", "url": "https://cuckootrade.com/" }
+        },
+        {
+          "@type": "BreadcrumbList",
+          "itemListElement": [
+            { "@type": "ListItem", "position": 1, "name": "CuckooTrade", "item": "https://cuckootrade.com/" },
+            { "@type": "ListItem", "position": 2, "name": "Guides", "item": "https://cuckootrade.com/guides" },
+            { "@type": "ListItem", "position": 3, "name": "Mock the Alpaca API" }
+          ]
+        },
+        {
+          "@type": "FAQPage",
+          "mainEntity": [
+            {
+              "@type": "Question",
+              "name": "Do I need an Alpaca API key to use CuckooTrade?",
+              "acceptedAnswer": { "@type": "Answer", "text": "No. CuckooTrade never checks credentials. The alpaca-py constructor requires key and secret arguments, so pass any non-empty strings and the server ignores them. There is no signup and no account." }
+            },
+            {
+              "@type": "Question",
+              "name": "How is this different from Alpaca paper trading?",
+              "acceptedAnswer": { "@type": "Answer", "text": "Alpaca paper trading still needs an account and a key, still rate-limits, and still serves real market data that changes daily and goes quiet at the close. CuckooTrade needs no key, returns byte-identical data for identical requests, stays open on nights and weekends, and can produce scripted crashes, halts, and stale feeds on demand." }
+            },
+            {
+              "@type": "Question",
+              "name": "Will existing alpaca-py code work unmodified?",
+              "acceptedAnswer": { "@type": "Answer", "text": "Yes, for historical stock bars. Set url_override to https://cuckootrade.com/api/v1/alpaca on StockHistoricalDataClient and nothing else changes. CuckooTrade runs alpaca-py against the live server as a CI acceptance test." }
+            },
+            {
+              "@type": "Question",
+              "name": "Is CuckooTrade data real market data?",
+              "acceptedAnswer": { "@type": "Answer", "text": "No. Every bar is generated, and every response carries an X-Cuckoo-Synthetic: true header saying so. It exists to exercise code paths, not to validate trading strategies." }
+            }
+          ]
+        }
+      ]
+    }
+    </script>
+  </head>
+  <body>
+    <!--@masthead-->
+
+    <div class="shell guide-shell">
+      <nav class="crumbs" aria-label="Breadcrumb">
+        <a href="/">Home</a><span aria-hidden="true">/</span>
+        <a href="/guides">Guides</a><span aria-hidden="true">/</span>
+        <span>Mock the Alpaca API</span>
+      </nav>
+
+      <div class="guide-head">
+        <span class="eyebrow">Guide</span>
+        <h1>How to mock the Alpaca API for local development and tests</h1>
+        <p class="lede">
+          Point <code>alpaca-py</code> at a mock Alpaca server by changing one
+          line. No API key, no paper account, no rate limit on your test suite —
+          and the same bars come back every time you run it.
+        </p>
+        <div class="guide-meta">
+          <span>Python</span><span aria-hidden="true">&middot;</span>
+          <span>alpaca-py</span><span aria-hidden="true">&middot;</span>
+          <span>5 minutes</span>
+        </div>
+      </div>
+
+      <article class="guide-body">
+        <section id="problem">
+          <h2>The problem</h2>
+          <p>
+            Any application that reads market data hits the same four problems
+            the moment you try to test it:
+          </p>
+          <ul>
+            <li><b>Credentials.</b> A key has to reach your laptop, your teammates&rsquo; laptops, and CI &mdash; secrets management for data that is not secret.</li>
+            <li><b>Rate limits.</b> A test suite that fans out across symbols burns a free-tier quota quickly, and then the build is red for a reason that has nothing to do with your code.</li>
+            <li><b>Closed markets.</b> Today&rsquo;s bars do not exist at 9pm, and Saturday has no bars at all. A demo rehearsed on Sunday behaves differently on Monday.</li>
+            <li><b>Moving data.</b> Real prices change, so an assertion about a specific close is a test with an expiry date.</li>
+          </ul>
+          <p>
+            None of these are problems with Alpaca. They are the consequence of
+            pointing a live production feed at something that is not
+            production. A mock server fixes all four at once.
+          </p>
+        </section>
+
+        <section id="one-line">
+          <h2>The one-line change</h2>
+          <p>
+            CuckooTrade serves Alpaca&rsquo;s market data wire format at
+            <code>https://cuckootrade.com/api/v1/alpaca</code>.
+            <code>alpaca-py</code> already supports pointing at a different host
+            through <code>url_override</code>, so the whole integration is that
+            argument:
+          </p>
+          <figure class="snip">
+            <figcaption>python &mdash; alpaca-py<button type="button" class="copy">copy</button></figcaption>
+            <pre>from datetime import datetime
+
+from alpaca.data.historical import StockHistoricalDataClient
+from alpaca.data.requests import StockBarsRequest
+from alpaca.data.timeframe import TimeFrame
+
+client = StockHistoricalDataClient(
+    api_key="any",          # required by the constructor,
+    secret_key="any",       # never checked by the server
+    url_override="https://cuckootrade.com/api/v1/alpaca",
+)
+
+bars = client.get_stock_bars(StockBarsRequest(
+    symbol_or_symbols=["AAPL", "MSFT"],
+    timeframe=TimeFrame.Day,
+    start=datetime(2026, 7, 1),
+    end=datetime(2026, 7, 31),
+))
+
+for bar in bars["AAPL"]:
+    print(bar.timestamp.date(), bar.close)</pre>
+          </figure>
+          <p>
+            The keys are positional requirements of the constructor, not
+            authentication. Delete the <code>url_override</code> line and the
+            same code talks to the real Alpaca again &mdash; there is no mocking
+            library to remove and no code path that exists only in tests.
+          </p>
+          <div class="note">
+            <b>Verified, not asserted.</b> CuckooTrade&rsquo;s CI runs
+            <code>alpaca-py</code> against the live server as an acceptance test
+            on every commit, so &ldquo;the SDK parses it unmodified&rdquo;
+            becomes a build failure the moment it stops being true.
+          </div>
+        </section>
+
+        <section id="verify">
+          <h2>Verify it in one command</h2>
+          <p>
+            Before wiring up the SDK, confirm the endpoint from a shell. This
+            works right now, from anywhere, with no setup:
+          </p>
+          <figure class="snip">
+            <figcaption>shell &mdash; curl<button type="button" class="copy">copy</button></figcaption>
+            <pre>curl -i 'https://cuckootrade.com/api/v1/alpaca/v2/stocks/bars?symbols=AAPL&amp;timeframe=1Day&amp;start=2026-07-01&amp;end=2026-07-31'</pre>
+          </figure>
+          <p>
+            The body is Alpaca&rsquo;s exact shape &mdash;
+            <code>{"bars": {"AAPL": [&hellip;]}, "next_page_token": null}</code>
+            with each bar carrying <code>t, o, h, l, c, v, n, vw</code>. Keep
+            the <code>-i</code>: the response headers say which server answered.
+          </p>
+          <figure class="snip">
+            <figcaption>response headers</figcaption>
+            <pre>x-cuckoo-synthetic: true
+x-cuckoo-generation: 1
+x-cuckoo-docs: https://cuckootrade.com/docs
+cache-control: public, max-age=31536000, immutable</pre>
+          </figure>
+          <p>
+            The marking rides in headers rather than the JSON body on purpose:
+            strict SDK parsers reject unknown body fields, so a
+            <code>"synthetic": true</code> key would have broken the exact
+            compatibility this page is about.
+          </p>
+        </section>
+
+        <section id="differences">
+          <h2>What matches, and what deliberately does not</h2>
+          <table class="guide-table">
+            <tr><th>Area</th><th>Behavior</th></tr>
+            <tr><td>Bar shape</td><td>Identical &mdash; <code>t, o, h, l, c, v, n, vw</code>.</td></tr>
+            <tr><td>Paths</td><td>Identical after the base URL: <code>/v2/stocks/bars</code>, <code>/v2/stocks/{symbol}/bars</code>, <code>/v2/stocks/bars/latest</code>.</td></tr>
+            <tr><td>Params</td><td><code>symbols</code>, <code>timeframe</code>, <code>start</code>, <code>end</code>, <code>limit</code>, <code>page_token</code>, <code>sort</code> behave as Alpaca documents them, including real cursor pagination.</td></tr>
+            <tr><td>Errors</td><td>Alpaca&rsquo;s <code>{"code", "message"}</code> shape and status codes &mdash; but the message states the valid grammar and includes a working example URL.</td></tr>
+            <tr><td>Auth</td><td>None. Keys are accepted and ignored rather than rejected, so client code that sends them works.</td></tr>
+            <tr><td>Symbols</td><td>Any well-formed string returns bars. ~130 well-known tickers sit at plausible price levels; every other string gets a stable hash-derived personality.</td></tr>
+            <tr><td>Partial bars</td><td>Only completed bars are served &mdash; no in-progress current day. Determinism requires it.</td></tr>
+            <tr><td>Extended hours</td><td>Not modeled. Intraday bars are regular session only, 09:30&ndash;16:00 ET.</td></tr>
+            <tr><td><code>feed</code></td><td>Accepted and ignored; there is one synthetic feed, so SIP and IEX return the same data.</td></tr>
+          </table>
+          <p>
+            The data follows the real NYSE calendar &mdash; no bars on weekends
+            or market holidays &mdash; while the API itself stays up regardless
+            of the hour. That combination is what makes a demo behave the same
+            on Sunday night as on Tuesday morning.
+          </p>
+        </section>
+
+        <section id="fixtures">
+          <h2>Writing tests that do not expire</h2>
+          <p>
+            The reason to prefer a deterministic server over recorded fixtures
+            is that you can assert on values. Every bar is a pure function of
+            symbol, timestamp, generation, and seed, so this holds indefinitely:
+          </p>
+          <figure class="snip">
+            <figcaption>python &mdash; pytest<button type="button" class="copy">copy</button></figcaption>
+            <pre>import httpx
+
+BASE = "https://cuckootrade.com/api/v1/alpaca"
+
+
+def test_bars_are_byte_stable():
+    params = {"symbols": "AAPL", "timeframe": "1Day",
+              "start": "2026-07-01", "end": "2026-07-31"}
+    first = httpx.get(f"{BASE}/v2/stocks/bars", params=params).text
+    second = httpx.get(f"{BASE}/v2/stocks/bars", params=params).text
+    assert first == second        # identical today, identical next year</pre>
+          </figure>
+          <p>Two extension parameters give you control over that world:</p>
+          <ul>
+            <li><code>seed=anything</code> &mdash; selects an alternate universe. Same structure and realism, different history. Useful when one test needs a symbol trending up and another needs it trending down.</li>
+            <li><code>generation=1</code> &mdash; pins the generator version. If the engine is ever improved that becomes generation 2, and generation 1 stays queryable forever. Pinning it in fixtures makes the guarantee explicit.</li>
+          </ul>
+          <p>
+            Both are ignored by real Alpaca, so leaving them in a shared code
+            path is harmless.
+          </p>
+        </section>
+
+        <section id="scenarios">
+          <h2>The part a real API cannot do</h2>
+          <p>
+            Once you are pointed at a mock server you get something the live API
+            structurally cannot offer: market conditions on demand. Reserved
+            ticker symbols return scripted behavior, anchored to the calendar so
+            the pattern appears in any 30-day window.
+          </p>
+          <figure class="snip">
+            <figcaption>shell &mdash; a crash, on a Tuesday<button type="button" class="copy">copy</button></figcaption>
+            <pre>curl 'https://cuckootrade.com/api/v1/alpaca/v2/stocks/bars?symbols=CRASH,HALTS,GAPPY&amp;timeframe=1Day'</pre>
+          </figure>
+          <table class="guide-table">
+            <tr><th>Ticker</th><th>What your code has to survive</th></tr>
+            <tr><td>CRASH</td><td>A ~25% drawdown over a few sessions, then a slow recovery.</td></tr>
+            <tr><td>HALTS</td><td>Minute bars <em>missing</em> mid-session &mdash; gap handling.</td></tr>
+            <tr><td>STALE</td><td>Bars arriving on time with the price frozen and <code>v=0</code> &mdash; freshness checks.</td></tr>
+            <tr><td>GAPPY</td><td>&plusmn;5&ndash;15% overnight gaps most days.</td></tr>
+            <tr><td>FLAT</td><td>Zero-range bars at exactly $100.00 &mdash; naive chart autoscaling divides by zero here.</td></tr>
+            <tr><td>PENNY</td><td>~$0.30 prices with four decimals &mdash; float and rounding bugs.</td></tr>
+            <tr><td>SPIKEY</td><td>Single-minute wicks that instantly revert.</td></tr>
+            <tr><td>CHOPPY</td><td>High volatility with zero net drift.</td></tr>
+          </table>
+          <p>
+            <a href="/guides/test-trading-bot-market-crash">Testing a trading bot against a crash, halt, or gap &rarr;</a>
+          </p>
+        </section>
+
+        <section id="self-host">
+          <h2>Running it yourself</h2>
+          <p>
+            A pipeline that depends on someone else&rsquo;s server has a new
+            outage mode. The engine is stateless and MIT-licensed, and
+            determinism means a local instance serves byte-identical data to
+            the hosted one for the same generation:
+          </p>
+          <figure class="snip">
+            <figcaption>shell &mdash; docker<button type="button" class="copy">copy</button></figcaption>
+            <pre>docker run -p 8000:8000 ghcr.io/tj-miller-dev/cuckootrade
+
+# then point the SDK at it:
+#   url_override="http://localhost:8000/api/v1/alpaca"</pre>
+          </figure>
+          <p>
+            Running locally also removes the 60 requests/minute limit and gives
+            an exact <code>flap:n</code> failure count, which a multi-replica
+            hosted deployment cannot promise.
+            <a href="/guides/market-data-in-ci-without-api-keys">Full CI setup, including a GitHub Actions service container &rarr;</a>
+          </p>
+        </section>
+
+        <section id="caveat">
+          <h2>One thing this is not for</h2>
+          <div class="disclaimer">
+            <b>Synthetic data cannot validate a strategy.</b> CuckooTrade exists
+            to exercise code paths &mdash; parsing, pagination, retries,
+            charting, alerting. A backtest that profits against generated prices
+            has learned the generator, not the market. Use real data, with all
+            its friction, for anything that informs a real trade.
+          </div>
+        </section>
+      </article>
+
+      <div class="guide-next">
+        <h2>Next</h2>
+        <div class="guide-list">
+          <a class="guide-card" href="/guides/test-trading-bot-market-crash">
+            <em>Guide</em><b>Test a trading bot against a market crash</b>
+            <span>Force a 25% drawdown, a trading halt, or an overnight gap on a schedule you choose.</span>
+          </a>
+          <a class="guide-card" href="/guides/market-data-in-ci-without-api-keys">
+            <em>Guide</em><b>Run market data tests in CI without API keys</b>
+            <span>A GitHub Actions workflow with no secrets, no rate limits, and no weekend failures.</span>
+          </a>
+          <a class="guide-card" href="/guides/test-retry-logic-and-api-failures">
+            <em>Guide</em><b>Test retry logic with deterministic fault injection</b>
+            <span>Make the API fail twice and succeed on the third try, the same way every run.</span>
+          </a>
+          <a class="guide-card" href="/docs#bars">
+            <em>Reference</em><b>Alpaca endpoint documentation</b>
+            <span>Every parameter, error shape, and pagination detail for the bars endpoints.</span>
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <!--@footer-->
+    <script type="module" src="/src/guide.js"></script>
+  </body>
+</html>

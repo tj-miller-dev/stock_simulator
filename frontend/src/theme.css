@@ -107,6 +107,12 @@ code, pre, .mono { font-family: var(--mono); }
   letter-spacing: 0.01em;
 }
 .wordmark b { color: var(--accent); font-weight: 700; }
+/* The mark and the word are wrapped in a home link, so the flex row that
+   spaces them lives on the anchor rather than on .wordmark itself. */
+.wordmark a {
+  display: flex; align-items: center; gap: 10px;
+  color: inherit; text-decoration: none;
+}
 .masthead nav {
   margin-left: auto; display: flex; align-items: center; gap: 24px;
   font-size: 0.92rem; font-weight: 500;
@@ -443,6 +449,14 @@ button.copy.done { color: var(--good); border-color: var(--good); }
   color: var(--ink-3);
 }
 .headers-pre .hl { color: var(--accent); }
+/* Same panel, reused by the fault-injection section to show commands rather
+   than headers: a shell prompt, the interesting part, and a muted result. */
+.headers-pre .prompt { color: var(--good); }
+.headers-pre .dim { font-style: italic; }
+
+/* A "read more" link trailing a section that ends in a list or an island,
+   where there is no copyblock paragraph to hang it off. */
+.more-link-row { margin: 22px 0 0; }
 
 /* ---- disclaimer (docs) ---- */
 .disclaimer {

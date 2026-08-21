@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#121412" />
+    <title>How to mock the Polygon.io API for development and tests — CuckooTrade</title>
+    <meta name="description" content="A free Polygon.io mock server with the real aggregates wire format, cursor pagination, and deterministic request_id values. No API key, no rate limit on your test suite." />
+    <link rel="canonical" href="https://cuckootrade.com/guides/mock-polygon-api" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <meta name="robots" content="index,follow" />
+    <meta property="og:title" content="How to mock the Polygon.io API for development and tests" />
+    <meta property="og:description" content="A free Polygon.io mock server with the real aggregates wire format, cursor pagination, and deterministic request_id values. No API key." />
+    <meta property="og:url" content="https://cuckootrade.com/guides/mock-polygon-api" />
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="CuckooTrade" />
+    <meta property="og:image" content="https://cuckootrade.com/og.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="https://cuckootrade.com/og.png" />
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "TechArticle",
+          "headline": "How to mock the Polygon.io API for development and tests",
+          "description": "A free Polygon.io mock server with the real aggregates wire format, cursor pagination, and deterministic request_id values. No API key, no rate limit on your test suite.",
+          "url": "https://cuckootrade.com/guides/mock-polygon-api",
+          "inLanguage": "en",
+          "proficiencyLevel": "Beginner",
+          "keywords": "mock Polygon API, Polygon.io mock server, polygon aggregates testing, fake market data, market data for CI",
+          "about": { "@type": "WebAPI", "name": "CuckooTrade", "url": "https://cuckootrade.com/" },
+          "publisher": { "@type": "Organization", "name": "CuckooTrade", "url": "https://cuckootrade.com/" },
+          "isPartOf": { "@type": "WebSite", "name": "CuckooTrade", "url": "https://cuckootrade.com/" }
+        },
+        {
+          "@type": "BreadcrumbList",
+          "itemListElement": [
+            { "@type": "ListItem", "position": 1, "name": "CuckooTrade", "item": "https://cuckootrade.com/" },
+            { "@type": "ListItem", "position": 2, "name": "Guides", "item": "https://cuckootrade.com/guides" },
+            { "@type": "ListItem", "position": 3, "name": "Mock the Polygon.io API" }
+          ]
+        },
+        {
+          "@type": "FAQPage",
+          "mainEntity": [
+            {
+              "@type": "Question",
+              "name": "Is there a free mock server for the Polygon.io API?",
+              "acceptedAnswer": { "@type": "Answer", "text": "Yes. CuckooTrade serves Polygon's aggregates wire format at https://cuckootrade.com/api/v1/polygon with no API key and no signup. Swap the base URL in your client and the paths, envelope, and cursor pagination all match." }
+            },
+            {
+              "@type": "Question",
+              "name": "Does the mock support Polygon cursor pagination?",
+              "acceptedAnswer": { "@type": "Answer", "text": "Yes. When more results remain, the response carries a next_url that already contains the window edge and cursor state. Fetch it unmodified, exactly as with the real API." }
+            },
+            {
+              "@type": "Question",
+              "name": "Do Polygon and Alpaca surfaces return the same data?",
+              "acceptedAnswer": { "@type": "Answer", "text": "Yes. All three provider surfaces read from one deterministic engine, so the same symbol and day returns identical OHLCV through Polygon, Alpaca, and Alpha Vantage - only the wire format differs. A cross-provider consistency test enforces this in CI." }
+            }
+          ]
+        }
+      ]
+    }
+    </script>
+  </head>
+  <body>
+    <!--@masthead-->
+
+    <div class="shell guide-shell">
+      <nav class="crumbs" aria-label="Breadcrumb">
+        <a href="/">Home</a><span aria-hidden="true">/</span>
+        <a href="/guides">Guides</a><span aria-hidden="true">/</span>
+        <span>Mock the Polygon.io API</span>
+      </nav>
+
+      <div class="guide-head">
+        <span class="eyebrow">Guide</span>
+        <h1>How to mock the Polygon.io API for development and tests</h1>
+        <p class="lede">
+          Polygon&rsquo;s aggregates wire format, served free and keyless &mdash;
+          the same paths, the same envelope, real cursor pagination, and
+          <code>request_id</code> values stable enough to assert on.
+        </p>
+        <div class="guide-meta">
+          <span>Any language</span><span aria-hidden="true">&middot;</span>
+          <span>REST</span><span aria-hidden="true">&middot;</span>
+          <span>6 minutes</span>
+        </div>
+      </div>
+
+      <article class="guide-body">
+        <section id="swap">
+          <h2>The base URL swap</h2>
+          <p>
+            Replace <code>https://api.polygon.io</code> with
+            <code>https://cuckootrade.com/api/v1/polygon</code>. Everything
+            after that is Polygon&rsquo;s own path:
+          </p>
+          <figure class="snip">
+            <figcaption>shell &mdash; aggregates, no key<button type="button" class="copy">copy</button></figcaption>
+            <pre>curl 'https://cuckootrade.com/api/v1/polygon/v2/aggs/ticker/MSFT/range/1/day/2026-07-01/2026-08-01'</pre>
+          </figure>
+          <figure class="snip">
+            <figcaption>json &mdash; the response envelope</figcaption>
+            <pre>{
+  "ticker": "MSFT",
+  "queryCount": 22,
+  "resultsCount": 22,
+  "adjusted": true,
+  "results": [
+    {"v": 24183400, "vw": 431.87, "o": 429.4, "c": 433.12,
+     "h": 434.9, "l": 428.1, "t": 1782964800000, "n": 214905}
+  ],
+  "status": "OK",
+  "request_id": "234ee1ae9d085ae58a8d694fac44e7ed",
+  "count": 22
+}</pre>
+          </figure>
+          <p>
+            Polygon&rsquo;s conventions are preserved down to the awkward
+            details: <code>t</code> is Unix milliseconds rather than an ISO
+            string, and <code>results</code> and <code>count</code> are
+            <em>omitted entirely</em> when nothing matched rather than sent as
+            <code>[]</code> and <code>0</code> &mdash; which is what the real API
+            does, and a common source of client-side crashes.
+          </p>
+          <div class="note">
+            <b><code>request_id</code> is deterministic.</b> It is an md5 of the
+            request, so the same call returns the same id forever. That makes it
+            assertable in a test, which the real API&rsquo;s random ids are not.
+          </div>
+        </section>
+
+        <section id="params">
+          <h2>Parameters</h2>
+          <table class="guide-table">
+            <tr><th>Segment / param</th><th>Accepted</th></tr>
+            <tr><td>multiplier</td><td>Any positive integer, subject to the timespan limits below.</td></tr>
+            <tr><td>timespan</td><td><code>minute</code> (1&ndash;59), <code>hour</code> (1&ndash;23), <code>day</code>, <code>week</code>, <code>month</code> (1,2,3,4,6,12), <code>quarter</code> (1,2,4), <code>year</code>.</td></tr>
+            <tr><td>from / to</td><td><code>YYYY-MM-DD</code> or Unix milliseconds &mdash; both, as Polygon allows.</td></tr>
+            <tr><td>sort</td><td><code>asc</code> (default) or <code>desc</code>.</td></tr>
+            <tr><td>limit</td><td>Up to 50,000.</td></tr>
+            <tr><td>cursor</td><td>Real cursor pagination, delivered via <code>next_url</code>.</td></tr>
+            <tr><td>adjusted</td><td>Accepted and echoed; this surface does not restate.</td></tr>
+            <tr><td>apiKey</td><td>Accepted and ignored. Nothing is ever checked.</td></tr>
+            <tr><td>seed, generation</td><td>CuckooTrade extensions &mdash; alternate universe, pinned generator.</td></tr>
+          </table>
+          <p>
+            There is also <code>/v2/aggs/ticker/{ticker}/prev</code> for the
+            previous session&rsquo;s daily bar.
+          </p>
+          <figure class="snip">
+            <figcaption>python &mdash; following the cursor<button type="button" class="copy">copy</button></figcaption>
+            <pre>import httpx
+
+url = ("https://cuckootrade.com/api/v1/polygon"
+       "/v2/aggs/ticker/MSFT/range/1/day/2026-01-01/2026-08-01?limit=10")
+
+while url:
+    payload = httpx.get(url).json()
+    for bar in payload.get("results", []):      # absent, not empty, when unmatched
+        print(bar["t"], bar["c"])
+    url = payload.get("next_url")               # already carries the cursor</pre>
+          </figure>
+        </section>
+
+        <section id="errors">
+          <h2>Errors keep Polygon&rsquo;s shape</h2>
+          <figure class="snip">
+            <figcaption>json &mdash; a 4xx</figcaption>
+            <pre>{
+  "status": "ERROR",
+  "request_id": "9f2c1b0e5d3a47c8b1e6f0a2d7c94b35",
+  "error": "timespan=fortnight is not valid. Use minute, hour, day, week, month, quarter or year -- e.g. /v2/aggs/ticker/MSFT/range/1/day/2026-07-01/2026-08-01"
+}
+</pre>
+          </figure>
+          <p>
+            The shape matches Polygon; the message deliberately does not. Errors
+            get read at the moment someone is stuck, so every one states the
+            valid grammar and includes a URL that works.
+          </p>
+        </section>
+
+        <section id="scenarios">
+          <h2>What the real API cannot do</h2>
+          <p>
+            Scenario tickers work on this surface exactly as they do on the
+            others &mdash; the engine is shared, so only the wire format differs:
+          </p>
+          <figure class="snip">
+            <figcaption>shell &mdash; a crash through Polygon&rsquo;s format<button type="button" class="copy">copy</button></figcaption>
+            <pre>curl 'https://cuckootrade.com/api/v1/polygon/v2/aggs/ticker/CRASH/range/1/day/2026-07-01/2026-08-01'</pre>
+          </figure>
+          <p>
+            And fault injection rides the same <code>scenario=</code> parameter,
+            returning Polygon&rsquo;s error shape at whatever status you name:
+          </p>
+          <figure class="snip">
+            <figcaption>shell &mdash; fail twice, then work<button type="button" class="copy">copy</button></figcaption>
+            <pre>curl -i 'https://cuckootrade.com/api/v1/polygon/v2/aggs/ticker/MSFT/range/1/day/2026-07-01/2026-08-01?scenario=flap:2'</pre>
+          </figure>
+        </section>
+
+        <section id="consistency">
+          <h2>One world, three formats</h2>
+          <p>
+            All three provider surfaces read from the same deterministic engine,
+            so the same symbol on the same day returns identical OHLCV through
+            each &mdash; only the serialisation differs. A cross-provider
+            consistency test enforces this in CI.
+          </p>
+          <p>
+            That makes this a useful place to test a provider migration: point
+            the same test suite at both surfaces and any difference is your
+            adapter, not the data.
+          </p>
+          <figure class="snip">
+            <figcaption>shell &mdash; same bar, two wire formats<button type="button" class="copy">copy</button></figcaption>
+            <pre>curl 'https://cuckootrade.com/api/v1/polygon/v2/aggs/ticker/AAPL/range/1/day/2026-07-06/2026-07-06'
+curl 'https://cuckootrade.com/api/v1/alpaca/v2/stocks/bars?symbols=AAPL&amp;timeframe=1Day&amp;start=2026-07-06&amp;end=2026-07-06'</pre>
+          </figure>
+        </section>
+
+        <section id="caveat">
+          <h2>Scope and honesty</h2>
+          <p>
+            Aggregates and previous-close are implemented. Reference data,
+            trades, quotes, snapshots, and the Polygon WebSocket are not. Every
+            response carries <code>X-Cuckoo-Synthetic: true</code>.
+          </p>
+          <div class="disclaimer">
+            <b>All data is synthetic.</b> This exists to exercise code paths, not
+            to validate trading strategies. A backtest that profits against
+            generated prices has learned the generator, not the market.
+          </div>
+        </section>
+      </article>
+
+      <div class="guide-next">
+        <h2>Next</h2>
+        <div class="guide-list">
+          <a class="guide-card" href="/guides/mock-alpha-vantage-api">
+            <em>Guide</em><b>Mock the Alpha Vantage API</b>
+            <span>Including intraday, which is a premium feature on the real API and free here.</span>
+          </a>
+          <a class="guide-card" href="/guides/mock-alpaca-api">
+            <em>Guide</em><b>Mock the Alpaca API</b>
+            <span>Point alpaca-py at a keyless mock server by changing one line.</span>
+          </a>
+          <a class="guide-card" href="/guides/test-retry-logic-and-api-failures">
+            <em>Guide</em><b>Test retry logic and API failures</b>
+            <span>503s, hangs, truncated bodies, and endpoints that fail twice then work.</span>
+          </a>
+          <a class="guide-card" href="/docs#polygon">
+            <em>Reference</em><b>Polygon endpoint documentation</b>
+            <span>Every parameter, limit, and pagination detail.</span>
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <!--@footer-->
+    <script type="module" src="/src/guide.js"></script>
+  </body>
+</html>

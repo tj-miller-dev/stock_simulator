@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#121412" />
+    <title>How to test a trading bot against a market crash, halt, or gap — CuckooTrade</title>
+    <meta name="description" content="Force a 25% crash, a trading halt, an overnight gap, or a frozen feed on demand — reproducibly, without waiting for the market to misbehave." />
+    <link rel="canonical" href="https://cuckootrade.com/guides/test-trading-bot-market-crash" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <meta name="robots" content="index,follow" />
+    <meta property="og:title" content="How to test a trading bot against a market crash, halt, or gap" />
+    <meta property="og:description" content="Force a 25% crash, a trading halt, an overnight gap, or a frozen feed on demand — reproducibly, without waiting for the market to misbehave." />
+    <meta property="og:url" content="https://cuckootrade.com/guides/test-trading-bot-market-crash" />
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="CuckooTrade" />
+    <meta property="og:image" content="https://cuckootrade.com/og.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="https://cuckootrade.com/og.png" />
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "TechArticle",
+          "headline": "How to test a trading bot against a market crash, halt, or gap",
+          "description": "Force a 25% crash, a trading halt, an overnight gap, or a frozen feed on demand - reproducibly, without waiting for the market to misbehave.",
+          "url": "https://cuckootrade.com/guides/test-trading-bot-market-crash",
+          "inLanguage": "en",
+          "proficiencyLevel": "Intermediate",
+          "keywords": "test trading bot, simulate market crash, simulate trading halt, flash crash testing, stale market data feed, overnight gap testing",
+          "about": { "@type": "WebAPI", "name": "CuckooTrade", "url": "https://cuckootrade.com/" },
+          "publisher": { "@type": "Organization", "name": "CuckooTrade", "url": "https://cuckootrade.com/" },
+          "isPartOf": { "@type": "WebSite", "name": "CuckooTrade", "url": "https://cuckootrade.com/" }
+        },
+        {
+          "@type": "BreadcrumbList",
+          "itemListElement": [
+            { "@type": "ListItem", "position": 1, "name": "CuckooTrade", "item": "https://cuckootrade.com/" },
+            { "@type": "ListItem", "position": 2, "name": "Guides", "item": "https://cuckootrade.com/guides" },
+            { "@type": "ListItem", "position": 3, "name": "Test a trading bot against a market crash" }
+          ]
+        },
+        {
+          "@type": "FAQPage",
+          "mainEntity": [
+            {
+              "@type": "Question",
+              "name": "How can I simulate a market crash to test my trading application?",
+              "acceptedAnswer": { "@type": "Answer", "text": "Request the reserved ticker CRASH from CuckooTrade. It produces a roughly 25% drawdown over several sessions followed by a slow recovery, anchored to the calendar so the pattern appears in any 30-day window. No key or setup is needed: curl https://cuckootrade.com/api/v1/alpaca/v2/stocks/bars?symbols=CRASH&timeframe=1Day" }
+            },
+            {
+              "@type": "Question",
+              "name": "How do I test that my code handles a trading halt?",
+              "acceptedAnswer": { "@type": "Answer", "text": "Request the ticker HALTS at a minute timeframe. Minute bars are absent during recurring intraday halt windows, exactly as a real feed omits bars when no trades occur, so your gap handling has something real to detect." }
+            },
+            {
+              "@type": "Question",
+              "name": "What is a stale market data feed and how do I test for it?",
+              "acceptedAnswer": { "@type": "Answer", "text": "A stale feed keeps delivering punctual, well-formed data whose values never change, so every liveness check reports healthy while the data is dead. It is more dangerous than an outage because nothing alerts. Request the ticker STALE: during its windows bars carry a frozen price with zero volume while timestamps advance normally, which is how a stuck feed actually lands in stored bars." }
+            },
+            {
+              "@type": "Question",
+              "name": "Can I use this to backtest a trading strategy?",
+              "acceptedAnswer": { "@type": "Answer", "text": "No. The data is synthetic, so a strategy that profits against it has learned the generator rather than the market. These scenarios exist to exercise code paths - risk limits, circuit breakers, gap handling, alerting - not to validate whether a strategy makes money." }
+            }
+          ]
+        }
+      ]
+    }
+    </script>
+  </head>
+  <body>
+    <!--@masthead-->
+
+    <div class="shell guide-shell">
+      <nav class="crumbs" aria-label="Breadcrumb">
+        <a href="/">Home</a><span aria-hidden="true">/</span>
+        <a href="/guides">Guides</a><span aria-hidden="true">/</span>
+        <span>Test a trading bot against a market crash</span>
+      </nav>
+
+      <div class="guide-head">
+        <span class="eyebrow">Guide</span>
+        <h1>How to test a trading bot against a market crash, halt, or gap</h1>
+        <p class="lede">
+          The market conditions that break trading software are exactly the ones
+          you cannot schedule. Here is how to force a 25% drawdown, a mid-session
+          halt, a 12% overnight gap, or a feed that freezes while looking
+          perfectly healthy &mdash; on a Tuesday afternoon, reproducibly.
+        </p>
+        <div class="guide-meta">
+          <span>Any language</span><span aria-hidden="true">&middot;</span>
+          <span>No key required</span><span aria-hidden="true">&middot;</span>
+          <span>10 minutes</span>
+        </div>
+      </div>
+
+      <article class="guide-body">
+        <section id="problem">
+          <h2>The untested path is the one that matters</h2>
+          <p>
+            Trading software spends almost all of its life in ordinary market
+            conditions, so that is what gets tested. The code that runs during a
+            crash &mdash; the risk limits, the circuit breaker, the reconnect,
+            the alert that should page someone &mdash; runs for the first time
+            during an actual crash.
+          </p>
+          <p>
+            You cannot ask a real data provider for a crash. You can wait for
+            one, which is not a test plan, or you can hand-build fixtures, which
+            takes real effort and encodes your own assumptions about what a
+            crash looks like &mdash; and those fixtures never cover the case
+            nobody thought of, like a feed that keeps ticking with the same
+            price.
+          </p>
+          <div class="note">
+            <b>A scheduled catastrophe.</b> CuckooTrade reserves a set of ticker
+            symbols that return scripted market behavior. Each is anchored to the
+            calendar rather than to your query window, with one guarantee: the
+            signature behavior appears in <em>any</em> 30-day view. Ask for the
+            last month of <code>CRASH</code> and there is always a crash in it.
+          </div>
+        </section>
+
+        <section id="crash">
+          <h2>A crash, right now</h2>
+          <figure class="snip">
+            <figcaption>shell &mdash; the last 30 days of CRASH<button type="button" class="copy">copy</button></figcaption>
+            <pre>curl 'https://cuckootrade.com/api/v1/alpaca/v2/stocks/bars?symbols=CRASH&amp;timeframe=1Day'</pre>
+          </figure>
+          <p>
+            Roughly a 25% drawdown over a handful of sessions, then a slow grind
+            back. Because it is deterministic, the drawdown is in the same place
+            every time you run the test &mdash; you can assert on it:
+          </p>
+          <figure class="snip">
+            <figcaption>python &mdash; a real assertion about a crash<button type="button" class="copy">copy</button></figcaption>
+            <pre>import httpx
+
+URL = "https://cuckootrade.com/api/v1/alpaca/v2/stocks/bars"
+
+
+def closes(symbol, **extra):
+    r = httpx.get(URL, params={"symbols": symbol, "timeframe": "1Day",
+                               "start": "2026-07-01", "end": "2026-07-31",
+                               **extra})
+    r.raise_for_status()
+    return [bar["c"] for bar in r.json()["bars"][symbol]]
+
+
+def max_drawdown(series):
+    peak, worst = series[0], 0.0
+    for price in series:
+        peak = max(peak, price)
+        worst = min(worst, price / peak - 1)
+    return worst
+
+
+def test_risk_limit_trips_on_a_crash():
+    series = closes("CRASH")
+    assert max_drawdown(series) &lt; -0.15      # the crash is really there
+    # ... now feed `series` to your risk engine and assert it halted trading</pre>
+          </figure>
+          <p>
+            That test does not expire. Next year, same window, same numbers.
+          </p>
+        </section>
+
+        <section id="catalogue">
+          <h2>The full catalogue</h2>
+          <p>
+            Each ticker isolates one failure mode, so a red test names the bug
+            rather than just reporting that something broke.
+          </p>
+          <table class="guide-table">
+            <tr><th>Ticker</th><th>Behavior</th><th>The bug it finds</th></tr>
+            <tr><td>CRASH</td><td>~25% drawdown mid-month, slow recovery.</td><td>Risk limits, circuit breakers, drawdown alerts.</td></tr>
+            <tr><td>MOON</td><td>Parabolic run-up, then a hard correction.</td><td>Position sizing, take-profit logic, y-axis rescaling.</td></tr>
+            <tr><td>GAPPY</td><td>&plusmn;5&ndash;15% overnight gaps most days.</td><td>Stop orders that assume continuity; overnight risk.</td></tr>
+            <tr><td>HALTS</td><td>Minute bars <em>absent</em> during halt windows.</td><td>Gap handling; loops that assume one bar per minute.</td></tr>
+            <tr><td>STALE</td><td>Price frozen, <code>v=0</code>, timestamps advancing.</td><td>Freshness checks. See below &mdash; this is the cruel one.</td></tr>
+            <tr><td>SPIKEY</td><td>Single-minute wicks that instantly revert.</td><td>Indicators and alerts triggered by one bad print.</td></tr>
+            <tr><td>FLAT</td><td>Zero-range bars pinned at $100.00.</td><td>Chart autoscaling and any <code>(high - low)</code> divisor.</td></tr>
+            <tr><td>PENNY</td><td>~$0.30 prices with four decimals.</td><td>Float precision, rounding, currency formatting.</td></tr>
+            <tr><td>CHOPPY</td><td>High volatility, zero net drift.</td><td>Mean-reversion logic; overtrading on noise.</td></tr>
+            <tr><td>SPLITS</td><td>Monthly 2:1 split that rewrites prior closes.</td><td>Reconciliation against stored history.</td></tr>
+            <tr><td>DIVVY</td><td>A dividend adjustment landing five sessions <em>late</em>.</td><td>The small restatement that slips past a naive check.</td></tr>
+            <tr><td>REVISED</td><td>A bad print carried until the exchange busts it.</td><td>Vendor restatements with no corporate action to explain them.</td></tr>
+          </table>
+          <figure class="snip">
+            <figcaption>shell &mdash; several at once<button type="button" class="copy">copy</button></figcaption>
+            <pre>curl 'https://cuckootrade.com/api/v1/alpaca/v2/stocks/bars?symbols=CRASH,GAPPY,SPIKEY,FLAT&amp;timeframe=1Day'</pre>
+          </figure>
+        </section>
+
+        <section id="stale">
+          <h2>The one nobody tests: a feed that lies</h2>
+          <p>
+            Most code checks <em>did I get a response</em>. Very little checks
+            <em>is this response current</em>. A stale feed is worse than a dead
+            one, because every liveness check you have reports green while your
+            positions are being managed against a price from twenty minutes ago.
+          </p>
+          <p>
+            <code>STALE</code> and <code>HALTS</code> are deliberate opposites,
+            and the pairing is the point:
+          </p>
+          <table class="guide-table">
+            <tr><th></th><th>HALTS</th><th>STALE</th></tr>
+            <tr><td>Bars in window</td><td>Absent.</td><td>Present: <code>v=0</code>, price unchanged.</td></tr>
+            <tr><td>Stream</td><td>Silent &mdash; heartbeats only.</td><td>Ticking, with a frozen timestamp.</td></tr>
+            <tr><td>Naive client sees</td><td>&ldquo;Nothing arrived.&rdquo;</td><td>&ldquo;Everything&rsquo;s fine.&rdquo;</td></tr>
+            <tr><td>Catches</td><td>Gap handling, reconnect.</td><td>Freshness checks.</td></tr>
+          </table>
+          <figure class="snip">
+            <figcaption>shell &mdash; a feed that freezes mid-session<button type="button" class="copy">copy</button></figcaption>
+            <pre># minute bars: watch volume go to zero while the clock keeps moving
+curl 'https://cuckootrade.com/api/v1/alpaca/v2/stocks/bars?symbols=STALE&amp;timeframe=1Min&amp;start=2026-07-15&amp;end=2026-07-16'
+
+# on the stream: punctual ticks, frozen `t`, healthy heartbeats
+curl -N 'https://cuckootrade.com/api/v1/stream?symbols=STALE'</pre>
+          </figure>
+          <p>
+            One catch-up bar absorbs the whole move when the window ends, and
+            the last minute of the session is never stale &mdash; so the day
+            always closes on a real print and the session volume is never zero.
+            If your code only notices the problem after the catch-up bar
+            arrives, it noticed too late.
+          </p>
+        </section>
+
+        <section id="restatement">
+          <h2>History that changes underneath you</h2>
+          <p>
+            If you store bars in a database, you have a reconciliation problem
+            whether or not you have a reconciliation job. Real feeds
+            <em>restate</em>: a split or a late dividend rewrites bars you
+            already saved.
+          </p>
+          <p>
+            <code>as_of</code> models this without giving up determinism. Pin it
+            and the bytes are frozen forever; omit it and history moves the way a
+            real vendor&rsquo;s does. So you can test a restatement by moving
+            <code>as_of</code> across the announcement instead of waiting a
+            month:
+          </p>
+          <figure class="snip">
+            <figcaption>shell &mdash; the same window, either side of a split<button type="button" class="copy">copy</button></figcaption>
+            <pre>BASE='https://cuckootrade.com/api/v1/alpaca/v2/stocks/bars'
+W='symbols=SPLITS&amp;timeframe=1Day&amp;start=2026-06-01&amp;end=2026-06-30'
+
+curl -s "$BASE?$W&amp;as_of=2026-07-09" | md5sum   # before the announcement
+curl -s "$BASE?$W&amp;as_of=2026-07-13" | md5sum   # after -- different bytes
+
+# and what changed, with announce/ex/process dates
+curl 'https://cuckootrade.com/api/v1/corporate-actions?symbols=SPLITS,DIVVY'</pre>
+          </figure>
+          <p>
+            <code>DIVVY</code> is the cruel one: its adjustment is 1&ndash;2%,
+            small enough to slip straight past a &ldquo;did anything move more
+            than 10%&rdquo; sanity check, and it lands about five sessions
+            <em>after</em> the ex-date. Every bar response reports
+            <code>X-Cuckoo-Restated: N actions applied</code>, so you can see
+            whether the window you asked for was actually rewritten.
+          </p>
+          <div class="note">
+            <b>Query behind the ex-date.</b> An action only rewrites bars dated
+            <em>before</em> it, and omitting <code>start</code>/<code>end</code>
+            defaults to the last 30 days &mdash; often the wrong window to see a
+            restatement in. If you get <code>0 actions applied</code>, move the
+            window back.
+          </div>
+        </section>
+
+        <section id="transport">
+          <h2>And when the connection itself breaks</h2>
+          <p>
+            Scenario tickers break the data. They never break the wire &mdash;
+            scripted tickers always return well-formed responses, on purpose.
+            To break the transport, ask explicitly:
+          </p>
+          <figure class="snip">
+            <figcaption>shell &mdash; a crash on a connection that also fails<button type="button" class="copy">copy</button></figcaption>
+            <pre>curl -i 'https://cuckootrade.com/api/v1/alpaca/v2/stocks/bars?symbols=CRASH&amp;scenario=flap:2'</pre>
+          </figure>
+          <p>
+            Nothing fires without <code>scenario=</code>, and every fault is
+            deterministic.
+            <a href="/guides/test-retry-logic-and-api-failures">Testing retry logic and API failures &rarr;</a>
+          </p>
+        </section>
+
+        <section id="caveat">
+          <h2>What this cannot tell you</h2>
+          <div class="disclaimer">
+            <b>These scenarios test your code, not your strategy.</b> The prices
+            are generated, so a strategy that survives <code>CRASH</code> has
+            survived one scripted synthetic drawdown &mdash; it has learned
+            nothing about real markets, and a profitable backtest here means
+            exactly nothing. What you <em>can</em> conclude is that your risk
+            limit fired, your reconnect worked, your chart did not divide by
+            zero, and your alert went out. That is worth having, and it is the
+            whole claim.
+          </div>
+        </section>
+      </article>
+
+      <div class="guide-next">
+        <h2>Next</h2>
+        <div class="guide-list">
+          <a class="guide-card" href="/guides/test-retry-logic-and-api-failures">
+            <em>Guide</em><b>Test retry logic and API failures</b>
+            <span>503s, hangs, truncated bodies, and an endpoint that fails twice then works.</span>
+          </a>
+          <a class="guide-card" href="/guides/mock-alpaca-api">
+            <em>Guide</em><b>Mock the Alpaca API</b>
+            <span>Point alpaca-py at a keyless mock server by changing one line.</span>
+          </a>
+          <a class="guide-card" href="/guides/test-sse-market-data-streams">
+            <em>Guide</em><b>Test a streaming market data client</b>
+            <span>A stream that ticks at 3am on a Sunday and drops exactly when you ask.</span>
+          </a>
+          <a class="guide-card" href="/playground">
+            <em>Try it</em><b>Open the playground</b>
+            <span>Chart any scenario ticker in the browser without writing code.</span>
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <!--@footer-->
+    <script type="module" src="/src/guide.js"></script>
+  </body>
+</html>
