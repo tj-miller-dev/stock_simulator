@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#121412" />
+    <title>How to test a streaming market data client when markets are closed — CuckooTrade</title>
+    <meta name="description" content="A free SSE market data stream that ticks at 3am on a Sunday, plus deterministic dropped sockets, truncated frames, and silent connections to test reconnect logic." />
+    <link rel="canonical" href="https://cuckootrade.com/guides/test-sse-market-data-streams" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <meta name="robots" content="index,follow" />
+    <meta property="og:title" content="How to test a streaming market data client when markets are closed" />
+    <meta property="og:description" content="A free SSE market data stream that ticks at 3am on a Sunday, plus deterministic dropped sockets and truncated frames to test reconnect logic." />
+    <meta property="og:url" content="https://cuckootrade.com/guides/test-sse-market-data-streams" />
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="CuckooTrade" />
+    <meta property="og:image" content="https://cuckootrade.com/og.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="https://cuckootrade.com/og.png" />
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "TechArticle",
+          "headline": "How to test a streaming market data client when markets are closed",
+          "description": "A free SSE market data stream that ticks at 3am on a Sunday, plus deterministic dropped sockets, truncated frames, and silent connections to test reconnect logic.",
+          "url": "https://cuckootrade.com/guides/test-sse-market-data-streams",
+          "inLanguage": "en",
+          "proficiencyLevel": "Intermediate",
+          "keywords": "test SSE stream, server-sent events testing, live market data stream for demos, test reconnect logic, streaming market data mock",
+          "about": { "@type": "WebAPI", "name": "CuckooTrade", "url": "https://cuckootrade.com/" },
+          "publisher": { "@type": "Organization", "name": "CuckooTrade", "url": "https://cuckootrade.com/" },
+          "isPartOf": { "@type": "WebSite", "name": "CuckooTrade", "url": "https://cuckootrade.com/" }
+        },
+        {
+          "@type": "BreadcrumbList",
+          "itemListElement": [
+            { "@type": "ListItem", "position": 1, "name": "CuckooTrade", "item": "https://cuckootrade.com/" },
+            { "@type": "ListItem", "position": 2, "name": "Guides", "item": "https://cuckootrade.com/guides" },
+            { "@type": "ListItem", "position": 3, "name": "Test a streaming market data client" }
+          ]
+        },
+        {
+          "@type": "FAQPage",
+          "mainEntity": [
+            {
+              "@type": "Question",
+              "name": "How can I test a live market data stream outside trading hours?",
+              "acceptedAnswer": { "@type": "Answer", "text": "CuckooTrade's SSE endpoint defaults to a demo clock: an always-open synthetic session that ticks at 3am on a Sunday exactly as it does at midday on a Tuesday. Run curl -N https://cuckootrade.com/api/v1/stream?symbols=CUCKOO with no key. Pass clock=real instead if you want a stream that follows the NYSE calendar and stays silent while the market is closed." }
+            },
+            {
+              "@type": "Question",
+              "name": "How do I test that my streaming client reconnects after a dropped connection?",
+              "acceptedAnswer": { "@type": "Answer", "text": "Add scenario=drop:20s to the stream URL. The socket closes at twenty seconds, mid-frame, with no close event - the same shape as a real network failure. It happens at exactly twenty seconds every time, so the test is reproducible and safe to keep in CI." }
+            },
+            {
+              "@type": "Question",
+              "name": "Why does an SSE stream need heartbeats?",
+              "acceptedAnswer": { "@type": "Answer", "text": "Load balancers close idle connections, commonly after 60 seconds. A stream that is legitimately quiet looks idle and gets killed. CuckooTrade sends a comment heartbeat roughly every 15 seconds, which keeps the connection alive without emitting an event your client has to handle. Any SSE service you build needs the same thing." }
+            },
+            {
+              "@type": "Question",
+              "name": "Is this an Alpaca-compatible WebSocket stream?",
+              "acceptedAnswer": { "@type": "Answer", "text": "No. The stream is Server-Sent Events rather than Alpaca's WebSocket protocol, deliberately: SSE is curl-able, which makes it its own documentation. The historical bars endpoints are the Alpaca wire-compatible surfaces. An Alpaca-compatible WebSocket is planned but not built." }
+            }
+          ]
+        }
+      ]
+    }
+    </script>
+  </head>
+  <body>
+    <!--@masthead-->
+
+    <div class="shell guide-shell">
+      <nav class="crumbs" aria-label="Breadcrumb">
+        <a href="/">Home</a><span aria-hidden="true">/</span>
+        <a href="/guides">Guides</a><span aria-hidden="true">/</span>
+        <span>Test a streaming market data client</span>
+      </nav>
+
+      <div class="guide-head">
+        <span class="eyebrow">Guide</span>
+        <h1>How to test a streaming market data client when markets are closed</h1>
+        <p class="lede">
+          A live tick stream that works at 3am on a Sunday, with no key and no
+          WebSocket client &mdash; plus dropped sockets, truncated frames and
+          silent connections on demand, so reconnect logic finally has something
+          to reconnect from.
+        </p>
+        <div class="guide-meta">
+          <span>SSE</span><span aria-hidden="true">&middot;</span>
+          <span>curl / Python / JS</span><span aria-hidden="true">&middot;</span>
+          <span>8 minutes</span>
+        </div>
+      </div>
+
+      <article class="guide-body">
+        <section id="problem">
+          <h2>Streaming code has a scheduling problem</h2>
+          <p>
+            Real market data streams are live for six and a half hours a day,
+            five days a week. That leaves most of the week &mdash; and all of
+            every weekend &mdash; where a streaming client cannot be exercised
+            at all. So the work happens on Tuesday afternoon, and the demo is on
+            Monday morning.
+          </p>
+          <p>The specific things that go untested:</p>
+          <ul>
+            <li>Reconnect after a dropped socket, which requires a dropped socket.</li>
+            <li>Idle timeouts, which require a stream that goes quiet.</li>
+            <li>Parse-error recovery, which requires a malformed frame that does not end the stream.</li>
+            <li>Anything at all, on a Sunday.</li>
+          </ul>
+        </section>
+
+        <section id="stream">
+          <h2>A stream that is always open</h2>
+          <p>
+            The endpoint is Server-Sent Events rather than a WebSocket, on
+            purpose: SSE is curl-able, which makes it its own documentation.
+          </p>
+          <figure class="snip">
+            <figcaption>shell &mdash; works right now, whatever time it is<button type="button" class="copy">copy</button></figcaption>
+            <pre>curl -N 'https://cuckootrade.com/api/v1/stream?symbols=CUCKOO,AAPL'</pre>
+          </figure>
+          <figure class="snip">
+            <figcaption>the frames</figcaption>
+            <pre>event: hello
+data: {"clock":"demo","symbols":["CUCKOO","AAPL"],"generation":1}
+
+event: tick
+data: {"S":"CUCKOO","p":102.34,"t":"2026-08-20T14:31:02Z"}
+
+: hb
+
+event: tick
+data: {"S":"AAPL","p":231.08,"t":"2026-08-20T14:31:03Z"}</pre>
+          </figure>
+          <p>
+            One <code>hello</code> on connect, then <code>tick</code> events
+            carrying <code>S</code> (symbol), <code>p</code> (price) and
+            <code>t</code> (the instant it claims to be). The
+            <code>: hb</code> lines are SSE <em>comments</em>, not events &mdash;
+            most clients drop them silently, which is exactly their purpose.
+          </p>
+          <table class="guide-table">
+            <tr><th>Param</th><th>Meaning</th></tr>
+            <tr><td>symbols</td><td>Up to 10, comma-separated. Scenario tickers work here too.</td></tr>
+            <tr><td>clock=demo</td><td><b>Default.</b> An always-open synthetic session. Never sleeps.</td></tr>
+            <tr><td>clock=real</td><td>Follows the NYSE calendar &mdash; silent while the market is closed.</td></tr>
+            <tr><td>seed</td><td>Selects an alternate universe, as everywhere else.</td></tr>
+            <tr><td>scenario</td><td>Transport faults. See below.</td></tr>
+          </table>
+          <div class="note">
+            <b>Both clocks are useful.</b> <code>clock=demo</code> is what a
+            demo or a dashboard wants: alive regardless of the hour.
+            <code>clock=real</code> is what you test against when the behavior
+            under test <em>is</em> &ldquo;what does my app do when the market is
+            closed&rdquo; &mdash; a case that is otherwise only reproducible by
+            waiting.
+          </div>
+          <p>
+            Limits: 10 symbols, 5 concurrent streams per address, and 15 minutes
+            per connection. That last one is deliberate: a client that cannot
+            handle the server ending a stream is a client with a bug, and this
+            surfaces it within the first quarter hour.
+          </p>
+        </section>
+
+        <section id="consume">
+          <h2>Consuming it</h2>
+          <figure class="snip">
+            <figcaption>javascript &mdash; browser EventSource<button type="button" class="copy">copy</button></figcaption>
+            <pre>const es = new EventSource(
+  'https://cuckootrade.com/api/v1/stream?symbols=CUCKOO,CRASH'
+)
+
+es.addEventListener('hello', (e) =&gt; {
+  console.log('connected:', JSON.parse(e.data))
+})
+
+es.addEventListener('tick', (e) =&gt; {
+  const { S, p, t } = JSON.parse(e.data)
+  console.log(S, p, t)
+})
+
+// EventSource reconnects on its own. Your job is to notice that it did,
+// and to decide whether the gap matters.
+es.onerror = () =&gt; console.warn('stream interrupted; browser will retry')</pre>
+          </figure>
+          <figure class="snip">
+            <figcaption>python &mdash; httpx, no SSE library needed<button type="button" class="copy">copy</button></figcaption>
+            <pre>import json
+
+import httpx
+
+URL = "https://cuckootrade.com/api/v1/stream"
+
+
+def ticks(symbols, **params):
+    with httpx.stream("GET", URL, timeout=None,
+                      params={"symbols": symbols, **params}) as r:
+        event = None
+        for line in r.iter_lines():
+            if line.startswith(":"):          # heartbeat comment
+                continue
+            if line.startswith("event: "):
+                event = line[7:]
+            elif line.startswith("data: ") and event == "tick":
+                yield json.loads(line[6:])
+
+
+for tick in ticks("CUCKOO"):
+    print(tick["S"], tick["p"])</pre>
+          </figure>
+          <p>
+            CORS is wide open and GET-only, so the browser example works from
+            any origin, including a local file.
+          </p>
+        </section>
+
+        <section id="faults">
+          <h2>Breaking it on purpose</h2>
+          <p>
+            This is the part a real feed cannot give you. Add
+            <code>scenario=</code> and the transport misbehaves &mdash;
+            deterministically, so the resulting test is not flaky and can live
+            in CI permanently.
+          </p>
+          <table class="guide-table">
+            <tr><th>Effect</th><th>What happens</th><th>What it catches</th></tr>
+            <tr><td>drop:S</td><td>Socket closes at T+S, mid-frame, no close event.</td><td>Reconnect logic.</td></tr>
+            <tr><td>truncate</td><td>One frame cut mid-JSON, connection stays up.</td><td>Parser resync &mdash; the hard one.</td></tr>
+            <tr><td>garbage:N</td><td>N invalid <code>data:</code> payloads among the good ones.</td><td>A parse error that must not kill the stream.</td></tr>
+            <tr><td>silent:S</td><td>Data <em>and</em> heartbeats stop for S seconds.</td><td>Read timeouts, liveness detection.</td></tr>
+            <tr><td>slow:MS</td><td>Delays the next frame.</td><td>Backpressure, buffering.</td></tr>
+          </table>
+          <figure class="snip">
+            <figcaption>shell &mdash; four failures you cannot otherwise schedule<button type="button" class="copy">copy</button></figcaption>
+            <pre># the socket dies twenty seconds in, mid-frame
+curl -N 'https://cuckootrade.com/api/v1/stream?symbols=CUCKOO&amp;scenario=drop:20s'
+
+# one frame arrives cut in half; the connection stays up
+curl -N 'https://cuckootrade.com/api/v1/stream?symbols=CUCKOO&amp;scenario=truncate'
+
+# three unparseable payloads mixed in with the good ones
+curl -N 'https://cuckootrade.com/api/v1/stream?symbols=CUCKOO&amp;scenario=garbage:3'
+
+# thirty seconds of total silence -- no data, no heartbeats
+curl -N 'https://cuckootrade.com/api/v1/stream?symbols=CUCKOO&amp;scenario=silent:30s'</pre>
+          </figure>
+          <p>
+            <code>drop</code> and <code>truncate</code> look similar and are
+            not. A dropped socket is the easy case &mdash; the connection ends
+            and something reconnects. A truncated frame on a <em>live</em>
+            connection is the case that finds bugs, because nothing tells the
+            client anything went wrong; it has to resynchronise its own parser.
+          </p>
+          <figure class="snip">
+            <figcaption>python &mdash; asserting the reconnect actually happens<button type="button" class="copy">copy</button></figcaption>
+            <pre>import time
+
+import httpx
+
+
+def test_client_reconnects_after_a_drop():
+    started = time.monotonic()
+    received = 0
+    try:
+        with httpx.stream("GET", URL, timeout=None,
+                          params={"symbols": "CUCKOO",
+                                  "scenario": "drop:5s"}) as r:
+            for _ in r.iter_lines():
+                received += 1
+    except httpx.RemoteProtocolError:
+        pass                                  # the drop, as requested
+
+    elapsed = time.monotonic() - started
+    assert received &gt; 0                       # it streamed before it died
+    assert 4 &lt; elapsed &lt; 9                    # and died on schedule</pre>
+          </figure>
+        </section>
+
+        <section id="stale">
+          <h2>The failure that looks like success</h2>
+          <p>
+            A dropped stream is loud. The dangerous one is a stream that keeps
+            delivering punctual, well-formed frames whose values never change
+            &mdash; every liveness check green, every number twenty minutes old.
+          </p>
+          <figure class="snip">
+            <figcaption>shell &mdash; healthy socket, dead data<button type="button" class="copy">copy</button></figcaption>
+            <pre>curl -N 'https://cuckootrade.com/api/v1/stream?symbols=STALE'</pre>
+          </figure>
+          <p>
+            On the demo clock <code>STALE</code> freezes for twenty seconds out
+            of every minute, on a fixed schedule, so you see it without waiting.
+            During the freeze <code>t</code> and <code>p</code> repeat verbatim
+            <em>and the heartbeats keep flowing</em> &mdash; that last detail is
+            the load-bearing one. The socket is healthy, the ticks are punctual,
+            the data is dead. If your client cannot tell the difference, neither
+            can your monitoring.
+          </p>
+        </section>
+
+        <section id="heartbeats">
+          <h2>A note on heartbeats, if you are building one of these</h2>
+          <p>
+            The <code>: hb</code> comment every ~15 seconds is not decoration.
+            Load balancers close idle connections &mdash; 60 seconds is a common
+            default &mdash; and a stream that is legitimately quiet
+            (<code>HALTS</code> goes silent by design) looks exactly like an
+            idle one. Without heartbeats, correct quiet behavior gets killed by
+            infrastructure.
+          </p>
+          <p>
+            An SSE comment is the right tool because it keeps the connection
+            warm without emitting an event the client has to know about.
+            <code>scenario=silent:30s</code> stops the heartbeats too, which is
+            how you test the timeout that is supposed to catch this.
+          </p>
+        </section>
+      </article>
+
+      <div class="guide-next">
+        <h2>Next</h2>
+        <div class="guide-list">
+          <a class="guide-card" href="/guides/test-retry-logic-and-api-failures">
+            <em>Guide</em><b>Test retry logic and API failures</b>
+            <span>The HTTP half: 503s, hangs, truncated bodies, and flapping endpoints.</span>
+          </a>
+          <a class="guide-card" href="/guides/test-trading-bot-market-crash">
+            <em>Guide</em><b>Test a trading bot against a market crash</b>
+            <span>Crashes, halts, gaps, and feeds that freeze while looking healthy.</span>
+          </a>
+          <a class="guide-card" href="/guides/mock-alpaca-api">
+            <em>Guide</em><b>Mock the Alpaca API</b>
+            <span>The historical bars side, wire-compatible with alpaca-py.</span>
+          </a>
+          <a class="guide-card" href="/docs#stream">
+            <em>Reference</em><b>Stream documentation</b>
+            <span>Frame grammar, clocks, limits, and heartbeat behavior.</span>
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <!--@footer-->
+    <script type="module" src="/src/guide.js"></script>
+  </body>
+</html>

@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#121412" />
+    <title>How to test retry logic and API failures deterministically — CuckooTrade</title>
+    <meta name="description" content="Make a market data API return 503, hang, truncate its body, or fail twice then succeed — on demand and identically every run. Deterministic fault injection you can keep in CI." />
+    <link rel="canonical" href="https://cuckootrade.com/guides/test-retry-logic-and-api-failures" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <meta name="robots" content="index,follow" />
+    <meta property="og:title" content="How to test retry logic and API failures deterministically" />
+    <meta property="og:description" content="Make a market data API return 503, hang, truncate its body, or fail twice then succeed — on demand and identically every run." />
+    <meta property="og:url" content="https://cuckootrade.com/guides/test-retry-logic-and-api-failures" />
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="CuckooTrade" />
+    <meta property="og:image" content="https://cuckootrade.com/og.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="https://cuckootrade.com/og.png" />
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "TechArticle",
+          "headline": "How to test retry logic and API failures deterministically",
+          "description": "Make a market data API return 503, hang, truncate its body, or fail twice then succeed - on demand and identically every run. Deterministic fault injection that belongs in CI.",
+          "url": "https://cuckootrade.com/guides/test-retry-logic-and-api-failures",
+          "inLanguage": "en",
+          "proficiencyLevel": "Intermediate",
+          "keywords": "test retry logic, HTTP fault injection, simulate 503 error, chaos testing API, deterministic failure testing, test exponential backoff",
+          "about": { "@type": "WebAPI", "name": "CuckooTrade", "url": "https://cuckootrade.com/" },
+          "publisher": { "@type": "Organization", "name": "CuckooTrade", "url": "https://cuckootrade.com/" },
+          "isPartOf": { "@type": "WebSite", "name": "CuckooTrade", "url": "https://cuckootrade.com/" }
+        },
+        {
+          "@type": "BreadcrumbList",
+          "itemListElement": [
+            { "@type": "ListItem", "position": 1, "name": "CuckooTrade", "item": "https://cuckootrade.com/" },
+            { "@type": "ListItem", "position": 2, "name": "Guides", "item": "https://cuckootrade.com/guides" },
+            { "@type": "ListItem", "position": 3, "name": "Test retry logic and API failures" }
+          ]
+        },
+        {
+          "@type": "FAQPage",
+          "mainEntity": [
+            {
+              "@type": "Question",
+              "name": "How do I make an API return a 503 error on demand for testing?",
+              "acceptedAnswer": { "@type": "Answer", "text": "Add scenario=status:503 to any CuckooTrade request. The response arrives at that status in the error shape of whichever provider surface you are calling, so your existing error handling sees exactly what a real outage would produce. Any status from 400 to 599 works." }
+            },
+            {
+              "@type": "Question",
+              "name": "How is this different from chaos engineering tools?",
+              "acceptedAnswer": { "@type": "Answer", "text": "Chaos tools fail randomly. Random failures make flaky tests, and flaky tests get deleted or ignored. CuckooTrade faults are deterministic: scenario=drop:20s drops the socket at twenty seconds every time, for everyone, so the test asserts a fixed outcome and can live in CI permanently." }
+            },
+            {
+              "@type": "Question",
+              "name": "Can these failures happen accidentally?",
+              "acceptedAnswer": { "@type": "Answer", "text": "No. Nothing fires without the scenario parameter in the URL, and that containment has its own test in the CI suite. A fault always appears in the URL that produced it, which makes it self-documenting and impossible to hit by accident." }
+            },
+            {
+              "@type": "Question",
+              "name": "How do I test that retries actually succeed rather than just fail correctly?",
+              "acceptedAnswer": { "@type": "Answer", "text": "Use scenario=flap:2. The endpoint fails twice and then serves normally, so a client with working retry and backoff passes while a client without it fails. Most fault tests assert that code fails correctly; this one asserts that it recovers, which is the assertion worth keeping." }
+            }
+          ]
+        }
+      ]
+    }
+    </script>
+  </head>
+  <body>
+    <!--@masthead-->
+
+    <div class="shell guide-shell">
+      <nav class="crumbs" aria-label="Breadcrumb">
+        <a href="/">Home</a><span aria-hidden="true">/</span>
+        <a href="/guides">Guides</a><span aria-hidden="true">/</span>
+        <span>Test retry logic and API failures</span>
+      </nav>
+
+      <div class="guide-head">
+        <span class="eyebrow">Guide</span>
+        <h1>How to test retry logic and API failures deterministically</h1>
+        <p class="lede">
+          Make the API return a 503, hang for four seconds, cut the body in
+          half, or fail exactly twice before it works &mdash; on demand, from a
+          query parameter, and identically on every run. These belong in CI,
+          not in a chaos experiment you run once.
+        </p>
+        <div class="guide-meta">
+          <span>Any language</span><span aria-hidden="true">&middot;</span>
+          <span>HTTP + SSE</span><span aria-hidden="true">&middot;</span>
+          <span>8 minutes</span>
+        </div>
+      </div>
+
+      <article class="guide-body">
+        <section id="problem">
+          <h2>Why retry code is almost never tested</h2>
+          <p>
+            Every serious API client has retry logic, backoff, and timeout
+            handling. Almost none of it is covered by a test, for a simple
+            reason: you cannot ask a production API to fail. So the code that
+            runs only during an outage is the code that has never run.
+          </p>
+          <p>The usual workarounds each give something up:</p>
+          <ul>
+            <li><b>Mocking libraries</b> test your mock&rsquo;s idea of a failure, not the failure. They cannot produce a socket that dies mid-frame or a body that stops short of its <code>Content-Length</code>.</li>
+            <li><b>A local proxy with fault rules</b> works, but it is infrastructure to install, configure, and keep working in CI.</li>
+            <li><b>Chaos engineering tools</b> fail <em>randomly</em>. Random failure makes a flaky test, and a flaky test gets marked skip. This is precisely why nobody runs chaos in CI.</li>
+          </ul>
+          <div class="note">
+            <b>The distinction that matters:</b> a deterministic fault is a test
+            assertion. A random fault is a coin flip that eventually turns your
+            build red for no reason. CuckooTrade&rsquo;s faults are
+            deterministic, which is what makes them safe to keep.
+          </div>
+        </section>
+
+        <section id="basics">
+          <h2>One parameter</h2>
+          <p>
+            Add <code>scenario=</code> to any request. Nothing fires without it
+            &mdash; ever &mdash; and the fault appears in the URL that produced
+            it, so a confused developer reading their own logs can see what
+            they asked for.
+          </p>
+          <figure class="snip">
+            <figcaption>shell &mdash; fail twice, then succeed<button type="button" class="copy">copy</button></figcaption>
+            <pre>curl -i 'https://cuckootrade.com/api/v1/alpaca/v2/stocks/bars?symbols=AAPL&amp;timeframe=1Day&amp;scenario=flap:2'</pre>
+          </figure>
+          <p>
+            Run that three times. The first two return an error; the third
+            returns bars. Faulted responses carry
+            <code>Cache-Control: no-store</code> and echo
+            <code>X-Cuckoo-Scenario: flap:2</code>, because a fault lies about a
+            moment and must never be cached as though it were history.
+          </p>
+        </section>
+
+        <section id="http-effects">
+          <h2>The HTTP effects</h2>
+          <table class="guide-table">
+            <tr><th>Effect</th><th>What happens</th><th>What it exercises</th></tr>
+            <tr><td>flap:N</td><td>Fails N times, then serves normally. N is 1&ndash;20.</td><td>Retry and backoff &mdash; the one that <em>passes</em>.</td></tr>
+            <tr><td>status:CODE</td><td>Returns that status, in the provider&rsquo;s own error shape. 400&ndash;599.</td><td>Error branches, alerting, circuit breakers.</td></tr>
+            <tr><td>slow:MS</td><td>Delays the response by MS milliseconds, up to 10,000.</td><td>Client timeouts and cancellation.</td></tr>
+            <tr><td>truncate</td><td>Sends an honest <code>Content-Length</code>, then half a body, then closes.</td><td>Partial-body parsing and short reads.</td></tr>
+          </table>
+          <p>
+            Effects combine with a comma:
+            <code>scenario=slow:2000,status:503</code> hangs for two seconds and
+            then fails. Units are optional but readable &mdash;
+            <code>slow:500ms</code> and <code>slow:500</code> are the same
+            thing.
+          </p>
+          <figure class="snip">
+            <figcaption>shell &mdash; a few at once<button type="button" class="copy">copy</button></figcaption>
+            <pre># a plain 503, in Alpaca's error shape
+curl -i 'https://cuckootrade.com/api/v1/alpaca/v2/stocks/bars?symbols=AAPL&amp;scenario=status:503'
+
+# a two-second hang, to trip a client timeout
+curl -i 'https://cuckootrade.com/api/v1/alpaca/v2/stocks/bars?symbols=AAPL&amp;scenario=slow:2000'
+
+# a body that stops halfway through, with a truthful Content-Length
+curl -i 'https://cuckootrade.com/api/v1/alpaca/v2/stocks/bars?symbols=AAPL&amp;scenario=truncate'</pre>
+          </figure>
+          <p>
+            The error <em>shape</em> follows whichever provider surface you
+            called: Alpaca&rsquo;s <code>{"code","message"}</code>, Polygon&rsquo;s
+            <code>{"status":"ERROR",&hellip;}</code>, and Alpha Vantage&rsquo;s
+            <code>"Error Message"</code> key. The one deliberate exception is
+            <code>status:CODE</code> on the Alpha Vantage surface: that API
+            normally reports errors as HTTP 200, but you explicitly asked for a
+            status code, so the request wins over the mimicry.
+          </p>
+        </section>
+
+        <section id="the-green-test">
+          <h2>The test worth keeping</h2>
+          <p>
+            Most fault tests assert that your code fails <em>correctly</em>.
+            <code>flap</code> asserts that it <em>recovers</em> &mdash; a client
+            with working retry passes where one without it fails. That is a
+            green test, and green tests survive.
+          </p>
+          <figure class="snip">
+            <figcaption>python &mdash; pytest + tenacity<button type="button" class="copy">copy</button></figcaption>
+            <pre>import httpx
+import pytest
+from tenacity import retry, stop_after_attempt, wait_fixed
+
+URL = "https://cuckootrade.com/api/v1/alpaca/v2/stocks/bars"
+FLAP = {"symbols": "AAPL", "timeframe": "1Day", "scenario": "flap:2"}
+
+
+def fetch_once():
+    r = httpx.get(URL, params=FLAP)
+    r.raise_for_status()
+    return r.json()
+
+
+@retry(stop=stop_after_attempt(4), wait=wait_fixed(0.2))
+def fetch_with_retry():
+    return fetch_once()
+
+
+def test_retry_recovers_from_a_flapping_endpoint():
+    assert "AAPL" in fetch_with_retry()["bars"]     # got through on attempt 3
+
+
+def test_without_retry_it_really_does_fail():
+    with pytest.raises(httpx.HTTPStatusError):
+        fetch_once()</pre>
+          </figure>
+          <div class="note">
+            <b>One caveat, stated plainly.</b> &ldquo;Fail the first N
+            attempts&rdquo; is the only thing here that cannot be stateless, so
+            the counter lives in each pod&rsquo;s memory. Across the hosted
+            deployment&rsquo;s replicas a <code>flap:2</code> can burn up to
+            2&nbsp;&times;&nbsp;replicas failures before it clears. If your test
+            asserts an exact count, run the container locally &mdash; that is
+            what the published image is for. The counter keys on the full query
+            string, so two tests running at once never consume each
+            other&rsquo;s budget.
+          </div>
+        </section>
+
+        <section id="stream-effects">
+          <h2>Breaking a stream instead</h2>
+          <p>
+            Streaming clients fail in ways request/response clients cannot, and
+            the SSE endpoint has its own effects for them:
+          </p>
+          <table class="guide-table">
+            <tr><th>Effect</th><th>What happens</th><th>What it exercises</th></tr>
+            <tr><td>drop:S</td><td>Closes the socket at T+S seconds, mid-frame, with no close event.</td><td>Reconnect logic.</td></tr>
+            <tr><td>garbage:N</td><td>Mixes N invalid <code>data:</code> payloads in among the good ones.</td><td>Parse-error handling that must not kill the stream.</td></tr>
+            <tr><td>silent:S</td><td>Stops data <em>and</em> heartbeats for S seconds.</td><td>Read timeouts and liveness detection.</td></tr>
+            <tr><td>truncate</td><td>Cuts one frame mid-JSON and leaves the connection up.</td><td>Resynchronising without reconnecting &mdash; the harder path.</td></tr>
+            <tr><td>slow:MS</td><td>Delays the next frame.</td><td>Backpressure and buffering.</td></tr>
+          </table>
+          <figure class="snip">
+            <figcaption>shell &mdash; the socket dies at twenty seconds<button type="button" class="copy">copy</button></figcaption>
+            <pre>curl -N 'https://cuckootrade.com/api/v1/stream?symbols=CUCKOO&amp;scenario=drop:20s'</pre>
+          </figure>
+          <p>
+            <code>drop</code> and <code>truncate</code> are a deliberate pair.
+            A dropped socket is the easy case: the connection ends and a client
+            reconnects. A truncated frame on a live connection is the one that
+            catches bugs, because the client has to resynchronise its parser
+            without the connection ever telling it something went wrong.
+            <a href="/guides/test-sse-market-data-streams">More on testing SSE clients &rarr;</a>
+          </p>
+        </section>
+
+        <section id="data-vs-transport">
+          <h2>Broken transport vs. broken data</h2>
+          <p>
+            <code>scenario=</code> breaks the pipe. Scenario <em>tickers</em>
+            break what comes through it, and the two are kept strictly apart:
+          </p>
+          <table class="guide-table">
+            <tr><th></th><th>scenario= parameter</th><th>Scenario tickers</th></tr>
+            <tr><td>Breaks</td><td>The transport &mdash; sockets, statuses, timing.</td><td>The data &mdash; crashes, halts, frozen feeds.</td></tr>
+            <tr><td>Wire shape</td><td>Deliberately malformed when asked.</td><td>Always valid. Never malformed.</td></tr>
+            <tr><td>Opt-in</td><td>Explicit, in the URL.</td><td>By using the ticker symbol.</td></tr>
+            <tr><td>Cached</td><td>Never &mdash; <code>no-store</code>.</td><td>Normally.</td></tr>
+          </table>
+          <p>
+            Scripted tickers never return malformed data on purpose: that would
+            break the wire-compatibility promise, and a keyless public endpoint
+            that serves garbage to an agent who merely stumbled onto it is a
+            brand problem rather than a feature. Faults require you to ask.
+          </p>
+        </section>
+
+        <section id="ci">
+          <h2>Keeping them in CI</h2>
+          <p>
+            Because the faults are reproducible, they behave like any other
+            fixture &mdash; no quarantine, no retry-the-test wrapper, no
+            flakiness budget. For exact <code>flap</code> counts and no rate
+            limit, run the container as a service:
+          </p>
+          <figure class="snip">
+            <figcaption>yaml &mdash; .github/workflows/test.yml<button type="button" class="copy">copy</button></figcaption>
+            <pre>jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      market-data:
+        image: ghcr.io/tj-miller-dev/cuckootrade
+        ports: ["8000:8000"]
+    env:
+      MARKET_DATA_URL: http://localhost:8000/api/v1/alpaca
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install -r requirements.txt
+      - run: pytest tests/</pre>
+          </figure>
+          <p>
+            <a href="/guides/market-data-in-ci-without-api-keys">The full CI walkthrough &rarr;</a>
+          </p>
+        </section>
+
+        <section id="reference">
+          <h2>Grammar reference</h2>
+          <p>
+            <code>scenario=effect[:value][,effect[:value]&hellip;]</code>. An
+            unknown name is rejected with a message listing what is valid on
+            that surface plus a working example, because the error is read at
+            the moment someone is stuck.
+          </p>
+          <p>
+            The lowercase ticker names &mdash; <code>crash</code>,
+            <code>moon</code>, <code>flat</code>, <code>gappy</code>,
+            <code>halts</code>, <code>stale</code>, <code>spikey</code>,
+            <code>penny</code>, <code>choppy</code> &mdash; are recognised and
+            reserved. Passing one points you at the ticker instead
+            (<code>symbols=CRASH</code>); applying a price shape to an arbitrary
+            symbol is a separate piece of work, and holding the names keeps that
+            door open.
+          </p>
+          <p><a href="/docs#faults">Full fault-injection reference &rarr;</a></p>
+        </section>
+      </article>
+
+      <div class="guide-next">
+        <h2>Next</h2>
+        <div class="guide-list">
+          <a class="guide-card" href="/guides/test-sse-market-data-streams">
+            <em>Guide</em><b>Test a streaming market data client</b>
+            <span>A stream that ticks at 3am on a Sunday, and drops on cue when you want it to.</span>
+          </a>
+          <a class="guide-card" href="/guides/test-trading-bot-market-crash">
+            <em>Guide</em><b>Test a trading bot against a market crash</b>
+            <span>Crashes, halts, gaps, and feeds that freeze while looking perfectly healthy.</span>
+          </a>
+          <a class="guide-card" href="/guides/market-data-in-ci-without-api-keys">
+            <em>Guide</em><b>Run market data tests in CI without API keys</b>
+            <span>No secrets, no rate limits, no weekend failures.</span>
+          </a>
+          <a class="guide-card" href="/docs#faults">
+            <em>Reference</em><b>scenario= documentation</b>
+            <span>Every effect, its range, its surface, and its caching behavior.</span>
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <!--@footer-->
+    <script type="module" src="/src/guide.js"></script>
+  </body>
+</html>

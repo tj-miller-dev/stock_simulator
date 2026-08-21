@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#121412" />
+    <title>Guides — testing trading software with synthetic market data — CuckooTrade</title>
+    <meta name="description" content="Practical guides for testing market data code: mock the Alpaca, Polygon and Alpha Vantage APIs, simulate a market crash or trading halt, test retry logic, and run market data tests in CI without API keys." />
+    <link rel="canonical" href="https://cuckootrade.com/guides" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <meta name="robots" content="index,follow" />
+    <meta property="og:title" content="Guides — testing trading software with synthetic market data" />
+    <meta property="og:description" content="Mock the Alpaca, Polygon and Alpha Vantage APIs, simulate a market crash or trading halt, test retry logic, and run market data tests in CI without API keys." />
+    <meta property="og:url" content="https://cuckootrade.com/guides" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="CuckooTrade" />
+    <meta property="og:image" content="https://cuckootrade.com/og.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="https://cuckootrade.com/og.png" />
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "CollectionPage",
+          "name": "CuckooTrade Guides",
+          "description": "Practical guides for testing trading software against synthetic market data.",
+          "url": "https://cuckootrade.com/guides",
+          "isPartOf": { "@type": "WebSite", "name": "CuckooTrade", "url": "https://cuckootrade.com/" }
+        },
+        {
+          "@type": "BreadcrumbList",
+          "itemListElement": [
+            { "@type": "ListItem", "position": 1, "name": "CuckooTrade", "item": "https://cuckootrade.com/" },
+            { "@type": "ListItem", "position": 2, "name": "Guides" }
+          ]
+        },
+        {
+          "@type": "ItemList",
+          "itemListElement": [
+            { "@type": "ListItem", "position": 1, "name": "How to mock the Alpaca API for local development and tests", "url": "https://cuckootrade.com/guides/mock-alpaca-api" },
+            { "@type": "ListItem", "position": 2, "name": "How to test a trading bot against a market crash, halt, or gap", "url": "https://cuckootrade.com/guides/test-trading-bot-market-crash" },
+            { "@type": "ListItem", "position": 3, "name": "How to test retry logic and API failures deterministically", "url": "https://cuckootrade.com/guides/test-retry-logic-and-api-failures" },
+            { "@type": "ListItem", "position": 4, "name": "How to run market data tests in CI without API keys", "url": "https://cuckootrade.com/guides/market-data-in-ci-without-api-keys" },
+            { "@type": "ListItem", "position": 5, "name": "How to test a streaming market data client when markets are closed", "url": "https://cuckootrade.com/guides/test-sse-market-data-streams" },
+            { "@type": "ListItem", "position": 6, "name": "How to mock the Polygon.io API for development and tests", "url": "https://cuckootrade.com/guides/mock-polygon-api" },
+            { "@type": "ListItem", "position": 7, "name": "How to mock the Alpha Vantage API, including intraday", "url": "https://cuckootrade.com/guides/mock-alpha-vantage-api" }
+          ]
+        }
+      ]
+    }
+    </script>
+  </head>
+  <body>
+    <!--@masthead-->
+
+    <div class="shell guide-shell">
+      <nav class="crumbs" aria-label="Breadcrumb">
+        <a href="/">Home</a><span aria-hidden="true">/</span>
+        <span>Guides</span>
+      </nav>
+
+      <div class="guide-head">
+        <span class="eyebrow">Guides</span>
+        <h1>Testing trading software against data you control</h1>
+        <p class="lede">
+          Every guide here is a working answer to a problem that market data
+          creates: a key you cannot put in CI, a crash you cannot schedule, a
+          socket that will not drop when you need it to. All examples run
+          verbatim against the live API, with no key and no signup.
+        </p>
+      </div>
+
+      <article class="guide-body">
+        <section id="integrating">
+          <h2>Point your client somewhere else</h2>
+          <div class="guide-list">
+            <a class="guide-card" href="/guides/mock-alpaca-api">
+              <em>Alpaca</em><b>How to mock the Alpaca API for local development and tests</b>
+              <span>One <code>url_override</code> line puts alpaca-py on a keyless mock server. What matches, what deliberately does not, and how to write fixtures that never expire.</span>
+            </a>
+            <a class="guide-card" href="/guides/mock-polygon-api">
+              <em>Polygon</em><b>How to mock the Polygon.io API for development and tests</b>
+              <span>The real aggregates envelope, cursor pagination via <code>next_url</code>, and <code>request_id</code> values stable enough to assert on.</span>
+            </a>
+            <a class="guide-card" href="/guides/mock-alpha-vantage-api">
+              <em>Alpha Vantage</em><b>How to mock the Alpha Vantage API, including intraday</b>
+              <span>Numbered string keys, newest-first maps, errors that arrive as HTTP 200 — and intraday history that is premium upstream and free here.</span>
+            </a>
+          </div>
+        </section>
+
+        <section id="breaking">
+          <h2>Break things on purpose</h2>
+          <div class="guide-list">
+            <a class="guide-card" href="/guides/test-trading-bot-market-crash">
+              <em>Scenarios</em><b>How to test a trading bot against a market crash, halt, or gap</b>
+              <span>Force a 25% drawdown, a mid-session halt, a 12% overnight gap, or a feed that freezes while every liveness check reports green.</span>
+            </a>
+            <a class="guide-card" href="/guides/test-retry-logic-and-api-failures">
+              <em>Faults</em><b>How to test retry logic and API failures deterministically</b>
+              <span>503s, hangs, half-written bodies, and an endpoint that fails exactly twice before it works. Reproducible, so it belongs in CI.</span>
+            </a>
+            <a class="guide-card" href="/guides/test-sse-market-data-streams">
+              <em>Streaming</em><b>How to test a streaming market data client when markets are closed</b>
+              <span>A tick stream that is alive at 3am on a Sunday, plus dropped sockets, truncated frames, and silent connections on cue.</span>
+            </a>
+          </div>
+        </section>
+
+        <section id="shipping">
+          <h2>Put it in the pipeline</h2>
+          <div class="guide-list">
+            <a class="guide-card" href="/guides/market-data-in-ci-without-api-keys">
+              <em>CI/CD</em><b>How to run market data tests in CI without API keys</b>
+              <span>Copy-paste GitHub Actions, GitLab CI, and docker-compose setups. No secrets, no rate limits, no red build on a Sunday, and assertions that hold next year.</span>
+            </a>
+          </div>
+        </section>
+
+        <section id="elsewhere">
+          <h2>Elsewhere</h2>
+          <p>
+            The <a href="/docs">documentation</a> is the parameter-by-parameter
+            reference. The <a href="/playground">playground</a> charts any
+            scenario ticker without writing code.
+            <a href="/api/docs">Swagger</a> and
+            <a href="/api/openapi.json">openapi.json</a> cover the machine
+            surface, and <a href="/llms.txt">llms.txt</a> is the whole API in a
+            single fetch for coding agents.
+          </p>
+          <div class="disclaimer">
+            <b>All data is synthetic.</b> Every response is generated and marked
+            with <code>X-Cuckoo-Synthetic: true</code>. CuckooTrade exists to
+            exercise code paths — development, CI, demos, teaching. It is not
+            market data, must never inform a real trade, and is not a
+            backtesting tool.
+          </div>
+        </section>
+      </article>
+    </div>
+
+    <!--@footer-->
+    <script type="module" src="/src/guide.js"></script>
+  </body>
+</html>
