@@ -107,6 +107,12 @@ code, pre, .mono { font-family: var(--mono); }
   letter-spacing: 0.01em;
 }
 .wordmark b { color: var(--accent); font-weight: 700; }
+/* The mark and the word are wrapped in a home link, so the flex row that
+   spaces them lives on the anchor rather than on .wordmark itself. */
+.wordmark a {
+  display: flex; align-items: center; gap: 10px;
+  color: inherit; text-decoration: none;
+}
 .masthead nav {
   margin-left: auto; display: flex; align-items: center; gap: 24px;
   font-size: 0.92rem; font-weight: 500;

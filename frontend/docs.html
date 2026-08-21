@@ -36,20 +36,7 @@
     </style>
   </head>
   <body>
-    <header class="masthead">
-      <div class="masthead-inner">
-        <span class="wordmark"><a href="/" style="color:inherit">CUCKOO<b>TRADE</b></a></span>
-        <nav>
-          <a href="/guides">Guides</a>
-          <a href="/playground">Playground</a>
-          <a href="/docs">Docs</a>
-          <a href="/api/docs">API Docs</a>
-          <a href="https://github.com/tj-miller-dev/stock_simulator">GitHub</a>
-          <a class="btn btn-primary btn-sm" href="#quickstart">Get started</a>
-        </nav>
-      </div>
-      <div id="ticker-ribbon" class="ribbon" aria-label="Live synthetic prices"></div>
-    </header>
+    <!--@masthead-->
 
     <div class="shell">
       <nav class="toc" aria-label="Contents">
@@ -418,44 +405,7 @@ curl -N 'https://cuckootrade.com/api/v1/stream?symbols=CUCKOO&amp;scenario=drop:
       </section>
     </div>
 
-    <footer>
-      <div class="foot-inner">
-        <div class="foot-grid">
-          <div class="foot-brand">
-            <span class="wordmark">CUCKOO<b>TRADE</b></span>
-            <p>A free, deterministic synthetic market data API for building and
-            testing trading software. Alpaca, Alpha Vantage, and Polygon
-            compatible &mdash; no key, no signup.</p>
-          </div>
-          <div class="foot-col">
-            <h4>Product</h4>
-            <a href="/guides">Guides</a>
-            <a href="/playground">Playground</a>
-            <a href="/docs">Documentation</a>
-            <a href="/api">API index</a>
-            <a href="/api/docs">OpenAPI docs</a>
-          </div>
-          <div class="foot-col">
-            <h4>Developers</h4>
-            <a href="https://github.com/tj-miller-dev/stock_simulator">GitHub</a>
-            <a href="/api/openapi.json">openapi.json</a>
-            <a href="/llms.txt">llms.txt</a>
-            <a href="/llms-full.txt">llms-full.txt</a>
-            <a href="/docs#self-host">Self-hosting</a>
-          </div>
-          <div class="foot-col">
-            <h4>Trust</h4>
-            <a href="/docs#disclaimer">Synthetic-data disclosure</a>
-            <a href="/docs#limits">Rate limits</a>
-            <a href="https://github.com/tj-miller-dev/stock_simulator/blob/main/LICENSE">MIT license</a>
-          </div>
-        </div>
-        <div class="fine">
-          <p>© 2026 CuckooTrade. Open source — the API, the frontend, and the infrastructure that runs them.</p>
-          <p>All data on this site is synthetic. Not market data, not investment advice.</p>
-        </div>
-      </div>
-    </footer>
+    <!--@footer-->
     <script type="module" src="/src/docs.js"></script>
   </body>
 </html>
