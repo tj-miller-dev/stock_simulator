@@ -152,11 +152,20 @@ git checkout simplify_deployment
 
 ## 1. Provision
 
+**Note the directory: `infra/`, not `terraform/`.** On this branch `terraform/` holds
+only the spent EKS state and no `.tf` files at all, so running `terraform apply` in there
+gets you `Error: No configuration files`. That separation is deliberate — it's what keeps
+the two stacks' state files from colliding.
+
 ```bash
-cd infra
+cd infra          # NOT terraform/
 terraform init
 terraform apply
 ```
+
+You need `infra/terraform.tfvars` first — see [Prerequisites](#prerequisites). It is a
+different variable set from the EKS stack's: same two AWS keys, but `public_access_cidrs`
+becomes `ssh_allowed_cidrs`, and `ssh_public_key` and `acme_email` are new.
 
 Takes about two minutes — there is no control plane to wait for any more. Note the
 outputs: `public_ip`, `ssh`, `site_url`, `github_actions_role_arn`.
