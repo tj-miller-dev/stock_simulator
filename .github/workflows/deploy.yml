@@ -1,20 +1,25 @@
 name: build and deploy
 
-# Only source changes trigger a build. The bump job below writes to k8s/ only,
-# which is deliberately not in this list -- that's what stops the workflow from
-# retriggering itself. (Belt and braces: pushes made with GITHUB_TOKEN don't
-# start new workflow runs either.)
+# The deploy branch is NOT `main`. `main` is kept as the EKS/ArgoCD portfolio
+# branch and deploys nothing at all; this branch is what actually runs
+# cuckootrade.com. Three places have to agree on the name -- this filter, the
+# CI role's trust policy (var.deploy_branch in infra/variables.tf), and the
+# branch checked out in /opt/cuckootrade on the instance.
+#
+# Only source changes build an image. Changes under deploy/ -- the Caddyfile,
+# the compose file -- need no build: the instance pulls them from git on its own
+# five-minute tick.
 on:
   push:
-    branches: [main]
+    branches: [simplify_deployment]
     paths:
       - 'api/**'
       - 'frontend/**'
       - '.github/workflows/deploy.yml'
   workflow_dispatch:
 
-# One deploy at a time. The bump job pushes to main, so overlapping runs would
-# race each other on the same branch.
+# One build at a time, so two pushes in quick succession can't race to decide
+# which image :latest ends up pointing at.
 concurrency:
   group: build-and-deploy
   cancel-in-progress: false
@@ -32,7 +37,7 @@ jobs:
   # which feeds the build matrix below.
   #
   # A manual run builds both: there's no diff to filter on, and the case that
-  # needs it is a freshly rebuilt cluster whose ECR repos are empty.
+  # needs it is a freshly built stack whose ECR repos are empty.
   changes:
     runs-on: ubuntu-latest
     outputs:
@@ -65,59 +70,35 @@ jobs:
 
       - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
         with:
-          role-to-assume: arn:aws:iam::307946643562:role/stock-simulator-github-actions
+          role-to-assume: arn:aws:iam::307946643562:role/cuckootrade-github-actions
           aws-region: ${{ env.AWS_REGION }}
 
       - uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2.1.6
 
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
+      # Two tags per build. :latest is what the instance pulls on its timer and
+      # is the whole deploy mechanism -- that's why the ECR repos are MUTABLE
+      # now, where the EKS stack had them IMMUTABLE. The commit-SHA tag is never
+      # overwritten by anything, so it remains the exact-provenance handle and
+      # the rollback target: pin IMAGE_TAG in deploy/.env on the box.
       - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: ./${{ matrix.service }}
           push: true
-          tags: ${{ env.ECR_REGISTRY }}/stock-simulator-${{ matrix.service }}:${{ github.sha }}
+          tags: |
+            ${{ env.ECR_REGISTRY }}/stock-simulator-${{ matrix.service }}:${{ github.sha }}
+            ${{ env.ECR_REGISTRY }}/stock-simulator-${{ matrix.service }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          # The ECR repos are IMMUTABLE. Attestations would push a second
-          # manifest under the same tag and get rejected -- same reason the
-          # manual docker build in the README passes --provenance=false.
+          # Attestations would push a second manifest under the same tag. Harmless
+          # now that the repos are mutable, but they buy nothing here and the
+          # manual `docker build` in the docs would have to match.
           provenance: false
           sbom: false
 
-  # Rewrites the image tag in k8s/ and commits. That commit is the actual
-  # deploy trigger: ArgoCD is watching this path with automated sync.
-  bump:
-    needs: [changes, build]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          ref: main
-
-      - name: Point manifests at the new images
-        env:
-          SERVICES: ${{ needs.changes.outputs.services }}
+      - name: Where this lands
         run: |
-          for service in $(echo "$SERVICES" | jq -r '.[]'); do
-            sed -i \
-              "s|image: .*/stock-simulator-${service}:.*|image: ${ECR_REGISTRY}/stock-simulator-${service}:${GITHUB_SHA}|" \
-              "k8s/${service}.yaml"
-          done
-          git diff --stat
-
-      - name: Commit
-        env:
-          SERVICES: ${{ needs.changes.outputs.services }}
-        run: |
-          git config user.name  'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add k8s/
-          if git diff --cached --quiet; then
-            echo 'manifests already point at this commit -- nothing to do'
-            exit 0
-          fi
-          git commit -m "deploy $(echo "$SERVICES" | jq -r 'join(", ")') @ ${GITHUB_SHA:0:7}"
-          git push
+          echo "Pushed ${{ matrix.service }} as :${GITHUB_SHA} and :latest."
+          echo "The instance reconciles every 5 minutes -- nothing else to do."
+          echo "To watch it land:  ssh ec2-user@<ip> 'journalctl -u cuckootrade-update -f'"

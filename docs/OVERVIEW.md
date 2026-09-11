@@ -23,8 +23,9 @@ fake* — that honesty is both the legal posture and the brand voice.
 
 1. **A DevOps portfolio piece.** The owner (TJ / tj-miller-dev) built the
    infrastructure — Terraform, EKS, ArgoCD GitOps, GitHub Actions with OIDC — as a
-   resume showcase. That part is **done and considered banked**; product work must not
-   destabilize it.
+   resume showcase. That part is **done and considered banked**, and now lives
+   permanently on the **`main` branch**, which no longer deploys anything. It is kept
+   intact precisely so it stays browsable; product work must not destabilize it.
 2. **A product people actually use.** Current priority is *impressive to visitors*
    (recruiters, developers landing on the site) slightly ahead of raw adoption, but
    real usage is the long-term goal. Flashy is good. The metric that matters is
@@ -80,9 +81,13 @@ The combination — no single leg is unique, the set is:
 
 ## Current state (as of Aug 2026)
 
-- **Infrastructure: complete.** EKS cluster, ArgoCD GitOps, Terraform modules, GitHub
-  Actions CI with OIDC (no stored keys), ALB ingress with ACM TLS, hardened (pinned
-  action SHAs, CIDR-restricted control plane). See the
+- **Infrastructure: two of them, on two branches.** `main` holds the completed EKS
+  build — cluster, ArgoCD GitOps, Terraform modules, ALB ingress with ACM TLS, hardened
+  with pinned action SHAs and a CIDR-restricted control plane — as the portfolio
+  artifact. It is no longer running. **`simplify_deployment` is what actually serves
+  cuckootrade.com** (Sep 2026): one `t3.micro` running the same two container images
+  behind Caddy, deployed by a five-minute systemd timer instead of ArgoCD. GitHub
+  Actions CI with OIDC and no stored keys is unchanged across both. See the
   [infrastructure runbook](QUICK_START.md).
 - **V1 is built** (branch `first_features`, Aug 2026). `api/engine/` is the
   deterministic hierarchical generator (calendar, personalities, magic tickers,
@@ -119,28 +124,35 @@ The combination — no single leg is unique, the set is:
 | SSE streaming in V1 (Alpaca-compatible WebSocket in V2) | Serves the live hero demonstration and the agent/demo audiences at once; SSE is trivial in FastAPI and curl-able. Note the ALB 60s idle timeout → heartbeats required. |
 | Dark trading-terminal aesthetic, restrained, with the cuckoo identity in voice + one mark | Domain-native and flashy (owner preference); differentiation carried by brand voice and the interactive hero, not the palette. No CRT/scanline costume. |
 | Landing page content must be static/prerendered HTML | SEO + LLM-citation quotability; a client-rendered SPA is invisible to both. Interactive parts mount as islands. |
-| Usage measured from ALB access logs in S3, not an analytics script (Aug 2026) | The audiences that matter most — CI pipelines, coding agents, curl — never execute JavaScript, so a page tracker would be blind to exactly the traffic worth counting. Edge logs also cover the API, which is the product. 90-day retention bounds both cost and how long client IPs are kept. |
+| Usage measured from edge access logs, not an analytics script (Aug 2026) | The audiences that matter most — CI pipelines, coding agents, curl — never execute JavaScript, so a page tracker would be blind to exactly the traffic worth counting. Edge logs also cover the API, which is the product. 90-day retention bounds both cost and how long client IPs are kept. The edge was the ALB writing to S3; since Sep 2026 it is Caddy writing JSON to the instance's own disk, same retention, but the history dies with the box. |
 | Open source, MIT license, one repo | Adoption is the currency; CI users need readable source; the infra being public *is* the portfolio. Self-hosting is a feature, not lost revenue. |
 | `"synthetic": true` marking + backtest disclaimer everywhere | Ethical load-bearing wall (see "backtest trap" above). |
 | V2 named but frozen: fake broker | Design the V1 price engine as an internal queryable service so V2 can consume it, but build no order/position state now. |
 | `as_of` as a second determinism axis, not an exception to the first (Aug 2026) | Real feeds restate, so "same bytes forever" was a fidelity gap. A bar is now a pure function of (symbol, timestamp, generation, seed, **as_of**): pin `as_of` and history is immutable exactly as before (golden files, CI); omit it and restating tickers move under you like a real vendor's. Still no database — `as_of` is just another input. |
+| Two branches, one of which deploys (Sep 2026) | The EKS stack cost ~$155/mo to serve about two visitors a day — the control plane, NAT gateway and ALB each cost more per month than the replacement costs in total. But it is also the resume artifact, and deleting it to save money would have thrown away goal #1 to serve goal #2. Keeping it on `main` and running the live site from `simplify_deployment` preserves both: recruiters get a complete, coherent EKS repo; the bill drops ~94% to ~$9/mo. `simplify_deployment` must never be merged into `main`. |
+| Pull-based deploys over a push from CI (Sep 2026) | The instance polls git and ECR every five minutes rather than CI reaching in to deploy. Keeps the deploy path credential-free in both directions — CI holds no SSH key and no SSM permission, the box holds no registry password (the ECR credential helper mints tokens from its instance profile) — and it preserves ArgoCD's actual useful property, that git is authoritative and hand-edits on the box get reverted. The cost is up to five minutes of latency on a deploy, against ArgoCD's ~3. |
 | Transport faults ride the reserved `scenario=` param, never a magic ticker (Aug 2026) | Scripted tickers must never return malformed data (wire-compat promise), and a keyless endpoint that serves garbage to an agent who stumbled onto it is a brand problem. A param appears in the URL that produced the failure. Faults are deterministic so they can live in CI, unlike the random chaos tools. |
 | No quote/snapshot endpoints in V1.1 (Aug 2026) | `STALE` would read most naturally on a quote, but a new endpoint family is a real scope increase for one ticker's benefit. It expresses itself on bars, `bars/latest` and the stream instead. Revisit only if quotes are wanted for their own sake. |
 
 ## How this repo works (critical for anyone making changes)
 
-- **Pushing to `main` deploys to production.** CI builds the touched service's image,
-  pushes to ECR tagged with the commit SHA, commits the tag bump into `k8s/`, and
-  ArgoCD syncs it to the cluster within ~3 minutes. **Work on feature branches; merge
-  to `main` only to ship.**
-- The ALB forwards paths unmodified (no rewrite), which is why the API mounts
-  everything under `/api` and the FastAPI docs URLs are manually prefixed.
+- **Which branch you are on changes what is true.** `main` is the EKS portfolio branch
+  and deploys nothing. **Pushing to `simplify_deployment` deploys to production:** CI
+  builds the touched service's image and pushes it to ECR as `:latest`, and the
+  instance reconciles itself against git and ECR within five minutes. App code lands on
+  `main` first, then merges *into* `simplify_deployment` to ship — never the other way,
+  which would delete the portfolio stack.
+- The edge forwards paths unmodified (no rewrite) under both deployments, which is why
+  the API mounts everything under `/api` and the FastAPI docs URLs are manually
+  prefixed.
 - The owner launches/runs things themselves — don't start servers or trigger deploys
   as an unrequested "verification" step.
-- Repo layout: `api/` (FastAPI), `frontend/` (React/Vite + nginx), `k8s/` (manifests
-  ArgoCD syncs), `terraform/` (all infra), `argocd/` (one-time bootstrap app),
-  `.github/workflows/` (build-and-deploy). Full operational detail, including the
-  teardown-order trap with ArgoCD self-heal, is in the [infrastructure runbook](QUICK_START.md).
+- Repo layout on `simplify_deployment`: `api/` (FastAPI), `frontend/` (React/Vite +
+  nginx), `infra/` (flat Terraform — network, instance, registry, cicd, dns), `deploy/`
+  (compose file, Caddyfile, update script), `.github/workflows/` (build-and-push). On
+  `main`, `infra/` and `deploy/` are instead `terraform/`, `k8s/` and `argocd/`. Full
+  operational detail — including decommissioning the cluster, and the teardown-order
+  trap with ArgoCD self-heal — is in the [infrastructure runbook](QUICK_START.md).
 
 ## Where to go next
 

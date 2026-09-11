@@ -1,0 +1,57 @@
+# The entire runtime: three containers on one box, where there used to be a
+# cluster. Two service images built by CI, plus Caddy as the edge.
+#
+# The values that can't live in git -- registry account, domain, ACME contact --
+# come from .env, which Terraform writes on first boot and update.sh leaves
+# alone because it is untracked.
+
+name: cuckootrade
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?set in deploy/.env}
+      ACME_EMAIL: ${ACME_EMAIL:?set in deploy/.env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates and the ACME account key. Losing this volume means
+      # re-issuing, which works but is rate-limited to 5 identical certificates
+      # per week -- so don't `docker volume prune` this one casually.
+      - caddy_data:/data
+      - caddy_config:/config
+      - /var/log/caddy:/var/log/caddy
+    mem_limit: 128m
+
+  # No depends_on anywhere in this file. On a freshly built stack the ECR repos
+  # are empty, and an ordering constraint would mean the edge waits for images
+  # that don't exist yet instead of coming up and getting its certificate while
+  # the first CI build runs.
+  api:
+    image: ${ECR_REGISTRY:?set in deploy/.env}/stock-simulator-api:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    expose:
+      - "8000"
+    healthcheck:
+      # No curl in the slim image, and no need for one.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health').read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    mem_limit: 512m
+
+  frontend:
+    image: ${ECR_REGISTRY:?set in deploy/.env}/stock-simulator-frontend:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    expose:
+      - "80"
+    mem_limit: 128m
+
+volumes:
+  caddy_data:
+  caddy_config:

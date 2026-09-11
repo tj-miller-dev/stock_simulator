@@ -1,254 +1,337 @@
-# Stock Simulator — Infra Setup
+# CuckooTrade — Infra Setup (simple deployment)
 
-A basic app (FastAPI backend + React frontend) running in EKS with ArgoCD managing
-deployments GitOps-style. Terraform provisions everything except the app itself:
+> **This is the `simplify_deployment` branch.** It describes the infrastructure that
+> actually serves cuckootrade.com: one small EC2 instance. The EKS/ArgoCD build lives on
+> `main` and is kept as a portfolio piece — `main`'s copy of this file still documents
+> the cluster, and that is correct for that branch. See [CLAUDE.md](../CLAUDE.md) for the
+> branch model.
 
-- **Terraform** → VPC/subnets, EKS cluster + node group, AWS Load Balancer Controller,
-  ECR repos, bare ArgoCD install, and the IAM role GitHub Actions assumes via OIDC.
-- **GitHub Actions** → on every push to `main` touching `api/` or `frontend/`, builds the
-  changed image, pushes it to ECR tagged with the commit SHA, and writes that tag into
-  `k8s/`.
-- **ArgoCD** → watches `k8s/` on GitHub and syncs Deployments/Services/Ingress into the
-  cluster. That tag-bump commit from CI is what triggers the rollout.
-- **AWS Load Balancer Controller** → turns the Ingress objects in `k8s/` into a real
-  ALB.
+The whole system, end to end:
 
-Day to day you don't touch any of this: push to `main`, and the change is live in a few
-minutes. See [Deploying changes](#deploying-changes).
+- **Terraform** (`infra/`) → a VPC with one public subnet, one `t3.micro`, an Elastic IP,
+  two Route53 A records, the ECR repos, and the IAM role GitHub Actions assumes via OIDC.
+- **GitHub Actions** → on every push to `simplify_deployment` touching `api/` or
+  `frontend/`, builds the changed image and pushes it to ECR as both `:<commit-sha>` and
+  `:latest`.
+- **The instance** → a systemd timer runs `deploy/update.sh` every five minutes: pull the
+  deploy branch, pull `:latest` from ECR, `docker compose up -d`. That is the entire
+  deployment system.
+- **Caddy** → terminates TLS with certificates it obtains from Let's Encrypt itself,
+  serves `/api/*` to the api container and everything else to the frontend container.
 
-This doc assumes you're rebuilding from nothing (e.g. after a `terraform destroy`).
+Day to day you don't touch any of it: push to `simplify_deployment`, and the change is
+live within about five minutes.
+
+## Why it looks like this
+
+It used to be EKS, and the bill didn't match the traffic — roughly two human visitors a
+day against a control plane, a NAT gateway and a load balancer that each cost more per
+month than the entire stack does now.
+
+| | Before (EKS) | Now |
+|---|---|---|
+| EKS control plane | ~$73 | — |
+| Worker node (`t3.medium`) | ~$30 | — |
+| NAT gateway | ~$33 | — (public subnet, no NAT) |
+| ALB | ~$16 | — (Caddy on the box) |
+| `t3.micro` instance | — | ~$7.60 |
+| EBS | ~$1.60 | ~$1.00 |
+| Elastic IP (attached) | — | $0 |
+| Route53 + ECR + S3 logs | ~$2 | ~$0.60 |
+| **Approx. monthly** | **~$155** | **~$9** |
+
+On-demand us-east-1 list prices, excluding data transfer and the domain registration.
+
+What was given up, honestly:
+
+- **Durable access logs.** The ALB wrote to S3, which survived anything. Caddy writes to
+  `/var/log/caddy` on the instance's own disk with the same 90-day retention. Lose the
+  box, lose the history.
+- **Redundancy.** There was never much — one node, one replica pair — but now a reboot is
+  visible downtime rather than a rescheduled pod. At this traffic level that is a fair
+  trade.
+- **Zero-downtime rollouts.** `docker compose up -d` replaces a container in place. A
+  deploy is a couple of seconds of connection refused.
 
 ## Prerequisites
 
-Installed locally: Terraform >= 1.9, AWS CLI v2, `kubectl`, Docker.
+Installed locally: Terraform >= 1.9, AWS CLI v2, Docker (only for building by hand),
+`gh` (only for triggering CI manually).
 
-`terraform/terraform.tfvars` (gitignored — never commit this) with your AWS credentials and your own IP:
-
-```hcl
-aws_access_key      = "..."
-aws_secret_key      = "..."
-public_access_cidrs = ["x.x.x.x/32"]
-```
-
-Find your current public IP with `curl https://checkip.amazonaws.com`. This restricts the EKS
-API's public endpoint (what `kubectl`/`terraform apply` use from your machine) to just you —
-nodes and in-cluster controllers always reach it privately, regardless of this setting. If your
-IP changes later, update this and re-apply, or you'll lose `kubectl`/`terraform` access to the
-cluster until you do.
-
-## 1. Provision infrastructure
+An SSH key pair, if you don't already have one you want to use:
 
 ```bash
+ssh-keygen -t ed25519 -C cuckootrade -f ~/.ssh/cuckootrade
+```
+
+`infra/terraform.tfvars` (gitignored — never commit this):
+
+```hcl
+aws_access_key    = "..."
+aws_secret_key    = "..."
+acme_email        = "you@example.com"                  # Let's Encrypt expiry warnings
+ssh_allowed_cidrs = ["x.x.x.x/32"]                     # curl https://checkip.amazonaws.com
+ssh_public_key    = "ssh-ed25519 AAAA... cuckootrade"  # contents of the .pub file
+```
+
+Only the public half of the key goes in here, so Terraform never holds a private key in
+state. If your home IP changes later, update `ssh_allowed_cidrs` and re-apply — you lose
+SSH until you do, but nothing else breaks: the site keeps serving and the update timer
+keeps deploying, because neither needs you logged in.
+
+## 0. Decommission the EKS stack — do this first
+
+**This is the step that actually saves the money.** Gutting the repo changes nothing on
+the AWS bill; the cluster bills until it is destroyed.
+
+It also has to happen *before* step 1, because both stacks declare the same ECR
+repository names and the same GitHub OIDC provider, and whichever is created second
+collides with the first. Expect the site to be down for the half hour in between — at two
+visitors a day, that is the cheapest part of this migration.
+
+The EKS Terraform state is a local, gitignored `terraform.tfstate` in `terraform/`. It is
+untracked, so it is still sitting there even though this branch removed the `.tf` files
+next to it. Switch to `main` to get those files back:
+
+```bash
+git checkout main
+```
+
+Then, **in this order**:
+
+```bash
+# 1. Stop ArgoCD managing the app. This step is the one that matters.
+kubectl delete -f argocd/root-app.yaml
+
+# 2. Now the Ingress will stay deleted
+kubectl delete ingress --all
+kubectl get ingress          # wait until empty, ~1 min
+
+# 3. Everything else
 cd terraform
+terraform destroy
+```
+
+**Why the ArgoCD delete comes first:** `argocd/root-app.yaml` sets `selfHeal: true`, so
+deleting the Ingress by hand just makes ArgoCD re-apply it from git within seconds, and
+the load balancer controller obediently builds a *brand new* ALB that Terraform has never
+heard of. You cannot win that race by hand — the desired state lives in git and the
+reconciler always wins. Deleting the Application first removes the reconciler from the
+picture.
+
+Expect 15–20 minutes. Don't interrupt it: a partial destroy can remove the NAT gateway
+while nodes are still running, which strands the kubelets and leaves namespaces stuck
+`Terminating`.
+
+If a destroy already failed that way and left an orphaned load balancer behind:
+
+```bash
+aws elbv2 describe-load-balancers --query 'LoadBalancers[].LoadBalancerArn' --output text
+aws elbv2 delete-load-balancer --load-balancer-arn <arn>
+cd terraform && terraform destroy
+```
+
+Two leftovers Terraform won't clean up, because it never created them:
+
+- **ExternalDNS's A records.** It ran with `policy=upsert-only`, which never deletes, so
+  its alias records for the apex and `www` outlive the cluster. Step 1 sets
+  `allow_overwrite = true` and takes them over, so you can ignore these.
+- **ExternalDNS's TXT ownership records.** Harmless, but they will sit in the zone
+  forever. Delete anything carrying a `heritage=external-dns` value:
+
+  ```bash
+  aws route53 list-resource-record-sets --hosted-zone-id <zone-id> \
+    --query "ResourceRecordSets[?Type=='TXT']"
+  ```
+
+Finally, come back:
+
+```bash
+git checkout simplify_deployment
+```
+
+## 1. Provision
+
+```bash
+cd infra
 terraform init
 terraform apply
 ```
 
-Takes ~15–20 minutes (mostly the EKS control plane). Note the outputs when it finishes —
-`cluster_name`, `configure_kubectl`, `ecr_repository_urls`.
+Takes about two minutes — there is no control plane to wait for any more. Note the
+outputs: `public_ip`, `ssh`, `site_url`, `github_actions_role_arn`.
 
-## 2. Point kubectl at the new cluster
+If `github_actions_role_arn` or `ecr_registry` disagree with the values hardcoded in
+`.github/workflows/deploy.yml`, update the workflow. That only happens if you change AWS
+accounts or `var.name`.
 
-```bash
-aws eks update-kubeconfig --name stock-simulator --region us-east-1
-kubectl get nodes   # should show Ready
-```
+## 2. Seed the first images
 
-## 3. Seed the first images
-
-You don't build images by hand during normal work — CI does it. But a freshly rebuilt
-cluster has empty ECR repos, and the tags currently referenced in `k8s/` don't exist yet,
-so pods would sit in `ImagePullBackOff`. Trigger one manual run to build both services:
+Step 0 destroyed the ECR repos, and `force_delete = true` means the images went with
+them. Step 1 created empty ones. Until something is pushed, the instance's update timer
+fails every five minutes with a pull error — harmless and self-correcting, it starts
+working the moment images exist.
 
 ```bash
-gh workflow run deploy.yml --ref main
+gh workflow run deploy.yml --ref simplify_deployment
 gh run watch
 ```
 
-A manual run always builds *both* services (there's no diff to path-filter on), pushes
-them to ECR tagged with the commit SHA, and commits those tags into `k8s/`.
+A manual run always builds *both* services, since there is no diff to path-filter on.
 
-<details>
-<summary>Building by hand instead (rarely needed)</summary>
+## 3. Verify
 
-```bash
-aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 307946643562.dkr.ecr.us-east-1.amazonaws.com
-
-docker build --provenance=false --sbom=false -t 307946643562.dkr.ecr.us-east-1.amazonaws.com/stock-simulator-api:v0.2 ./api
-docker push 307946643562.dkr.ecr.us-east-1.amazonaws.com/stock-simulator-api:v0.2
-```
-
-**On Windows PowerShell the `docker login` above fails** with `400 Bad Request`. PowerShell
-5.1 injects a UTF-8 BOM when piping between two native commands, which corrupts the
-password. Let `cmd.exe` own the pipe instead:
-
-```powershell
-cmd /c "aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 307946643562.dkr.ecr.us-east-1.amazonaws.com"
-```
-
-Setting `$OutputEncoding` does *not* fix it. Git Bash works fine as-is.
-
-`--provenance=false --sbom=false` avoids a confusing but harmless error — without them
-Docker also pushes a build-attestation manifest under the same tag, which ECR rejects
-because the repos are `IMMUTABLE`. The CI workflow sets the same two flags.
-
-**Tags are immutable**, so you can't re-push one. Bump the version and update the `image:`
-field in `k8s/api.yaml` / `k8s/frontend.yaml` to match.
-
-</details>
-
-The account ID (`307946643562`) is fixed to this AWS account — it won't change across a
-destroy/recreate of the same account. If you ever deploy into a *different* AWS account,
-update the `image:` fields in `k8s/api.yaml` and `k8s/frontend.yaml`, the
-`access_logs.s3.bucket` attribute in `k8s/ingress.yaml` (the bucket name embeds the
-account ID — `terraform output alb_access_logs_bucket` prints the correct value), and the
-`ECR_REGISTRY` / `role-to-assume` values in `.github/workflows/deploy.yml`.
-
-## 4. Bootstrap ArgoCD (one-time, manual)
-
-`argocd/root-app.yaml` is deliberately *not* managed by Terraform (avoids a chicken-and-egg
-problem with the Application CRD not existing yet in the same apply). It has to be applied
-by hand once per cluster:
+Within five minutes of the images landing:
 
 ```bash
-kubectl apply -f argocd/root-app.yaml
-kubectl -n argocd get applications   # watch it sync
+curl -I https://cuckootrade.com
+curl -s https://cuckootrade.com/api/health
 ```
 
-From this point on, ArgoCD watches the `main` branch of this repo's `k8s/` folder and
-keeps the cluster in sync automatically (`prune` + `selfHeal`) — no more manual `kubectl apply`
-for app changes, just `git push`.
+The first HTTPS request against a fresh box can take a few extra seconds while Caddy
+completes the ACME handshake. If the name doesn't resolve at all yet, DNS is still
+propagating — the records are new and carry a 300s TTL.
 
-## 5. Find your app's URL
+To watch the box converge:
 
 ```bash
-kubectl get ingress
-```
-
-`api-ingress` and `frontend-ingress` share a single ALB (grouped via the
-`alb.ingress.kubernetes.io/group.name` annotation) — use the `ADDRESS` column value.
-Give it a minute or two after first creation for DNS to propagate and for target health
-checks to pass.
-
-```
-http://<address>/            → frontend
-http://<address>/api/hello   → api
+ssh ec2-user@<public_ip> 'journalctl -u cuckootrade-update -f'
 ```
 
 ## Deploying changes
 
-Edit code under `api/` or `frontend/`, push to `main`, done:
+App code lands on `main` first — that is still the canonical branch for the product —
+then comes here to ship:
 
 ```bash
-git commit -am "add endpoint"
-git push origin main
+git checkout simplify_deployment
+git merge main
+git push origin simplify_deployment
 ```
 
-What happens next, all automatic:
+Or commit directly to this branch for deploy-only changes. Either way:
 
-1. `.github/workflows/deploy.yml` fires — but only for the service you actually touched.
-   A frontend-only commit never rebuilds the api.
+1. `.github/workflows/deploy.yml` fires, only for the service you actually touched. A
+   frontend-only commit never rebuilds the api.
 2. It assumes an AWS role via OIDC (no stored keys), builds the image, and pushes it to
-   ECR tagged with the full commit SHA.
-3. It rewrites the `image:` line in `k8s/api.yaml` or `k8s/frontend.yaml` and commits that
-   back to `main` as `deploy api @ 8697824`.
-4. ArgoCD notices the manifest change and rolls it out. It polls every ~3 minutes, so
-   allow for that, or force it with `kubectl -n argocd annotate app stock-simulator argocd.argoproj.io/refresh=hard --overwrite`.
+   ECR as `:<commit-sha>` and `:latest`.
+3. Within five minutes the instance's timer pulls `:latest` and `docker compose up -d`
+   replaces the container.
 
-That bump commit only touches `k8s/`, which isn't in the workflow's path filter, so it
-can't retrigger the pipeline. (Pushes made with `GITHUB_TOKEN` don't start workflow runs
-either, so there are two independent guards against a loop.)
+There is no bump commit and no manifest rewrite any more — the moving `:latest` tag is
+what carries the release. That is why the ECR repos are `MUTABLE` on this branch where
+`main` had them `IMMUTABLE`.
 
-Because tags are commit SHAs, `kubectl get deploy api -o jsonpath='{..image}'` tells you
-the exact commit running in the cluster, and rolling back is just reverting the manifest
-commit.
+Changes under `deploy/` — the Caddyfile, the compose file, the update script itself —
+need no build at all. The instance pulls those straight from git on the same tick.
+
+**git is authoritative on the box.** `update.sh` runs `git reset --hard` every five
+minutes, so anything you edit under `/opt/cuckootrade` by hand is reverted on the next
+tick. That is the selfHeal half of what ArgoCD used to do. The one exception is
+`deploy/.env`, which is untracked and left alone.
 
 ### If a deploy doesn't land
 
 ```bash
-gh run list --workflow deploy.yml --limit 5   # did CI pass?
-kubectl -n argocd get app stock-simulator     # SYNC/HEALTH status
-kubectl get pods                              # ImagePullBackOff = image never pushed
+gh run list --workflow deploy.yml --limit 5        # did CI pass?
+
+ssh ec2-user@<ip>
+systemctl status cuckootrade-update                # did the timer run, did it fail?
+journalctl -u cuckootrade-update -n 50             # why
+cd /opt/cuckootrade/deploy && docker compose ps    # what is actually up
+docker compose logs --tail 50 api
 ```
 
 **`Could not assume role with OIDC: Not authorized to perform sts:AssumeRoleWithWebIdentity`**
-means the token's `sub` claim doesn't match the role's trust policy. GitHub issues
-*immutable* subject claims that embed numeric owner and repo IDs, so the value is pinned
-in `var.github_repository_immutable`. If you rename the repo, transfer it, or point this
-at a different repo, re-read the real value and re-apply:
+means the token's `sub` claim doesn't match the role's trust policy — almost always
+because the branch name changed. `var.deploy_branch` in `infra/variables.tf`, the
+`on.push.branches` filter in the workflow, and the branch checked out in
+`/opt/cuckootrade` all have to agree. If you renamed or transferred the repo instead,
+re-read the immutable subject and re-apply:
 
 ```bash
 gh api repos/OWNER/NAME/actions/oidc/customization/sub -q .sub_claim_prefix
 ```
 
-To see what a failing run actually presented, rather than guessing:
+### Rolling back
+
+Every build's commit-SHA tag is still in ECR and nothing ever overwrites one. Pin it:
 
 ```bash
-aws cloudtrail lookup-events --lookup-attributes \
-  AttributeKey=EventName,AttributeValue=AssumeRoleWithWebIdentity \
-  --max-results 3 --query 'Events[].CloudTrailEvent' --output text
+ssh ec2-user@<ip>
+cd /opt/cuckootrade/deploy
+echo 'IMAGE_TAG=<sha>' >> .env
+docker compose up -d
 ```
+
+`.env` is untracked, so the timer won't undo this — which also means the pin is permanent
+until you remove the line and let `:latest` take over again. Rolling back is the easy
+half; remember to unpin.
+
+## Operating the box
+
+```bash
+ssh ec2-user@<public_ip>
+
+cd /opt/cuckootrade/deploy
+docker compose ps                    # what is running
+docker compose logs -f api           # one line per request, health checks excluded
+docker compose logs -f caddy         # TLS and proxy errors
+docker compose restart api           # without waiting for a timer tick
+
+systemctl start cuckootrade-update   # force a reconcile now
+systemctl list-timers                # when the next one fires
+
+free -h                              # swap in steady use means t3.micro is undersized
+df -h /                              # image churn; the timer prunes dangling layers
+```
+
+To rebuild the machine from scratch — an ordinary, supported operation, because nothing
+on it is precious:
+
+```bash
+cd infra
+terraform apply -replace=aws_instance.this
+```
+
+It reinstalls, re-clones and re-pulls in about two minutes. The Elastic IP and the DNS
+records don't move. The one real cost is that Caddy re-issues its certificate, and Let's
+Encrypt allows 5 identical certificates per week — so don't do this a dozen times in an
+afternoon.
 
 ## Seeing who's actually using it
 
-There is no analytics vendor and no tracking script. Usage is reconstructed from request
-logs, which live in two places with very different lifespans:
-
-| Where | Contains | Lifespan |
-|---|---|---|
-| **S3** — `stock-simulator-alb-logs-<account>` | Every request to *both* services at the ALB: client IP, path + query string, status, user agent, referer, bytes, latency | 90 days (lifecycle rule) |
-| **Pod stdout** — `kubectl logs` | Same requests, per service, human-readable | Dies with the pod — a deploy, restart, or scale-down wipes it |
-
-The S3 copy is the one that answers "are people coming back". Pod logs are for debugging
-what's happening *right now*.
-
-> **Order matters when enabling this.** The bucket and its policy come from Terraform, but
-> the switch that turns logging on is the `access_logs.s3.*` attribute in
-> `k8s/ingress.yaml`, which ArgoCD applies. If that annotation reaches the cluster before
-> the bucket exists, the load balancer controller fails reconciliation with
-> `InvalidConfigurationRequest: Access Denied for bucket` and stops applying *any* ingress
-> change until it's fixed. Run `terraform apply` first, then merge the manifest. On a
-> rebuild from scratch the normal step order already does this — Terraform is step 1,
-> ArgoCD is step 4.
-
-Two things are deliberately off, and both cost money for little return here: EKS
-control-plane logging to CloudWatch (see `terraform/modules/cluster/main.tf`), and any
-log-shipping agent. If you ever want pod logs to outlive their pod, that's the gap to fill.
-
-### Reading the ALB logs
-
-ALB flushes gzipped log files to S3 every 5 minutes. At this traffic level (~1k
-requests/day) the whole corpus is small enough to just pull down and grep — Athena is
-real setup effort and only starts paying off at a few million rows. Sync a day and
-decompress:
+Still no analytics vendor and no tracking script: the audiences that matter — CI
+pipelines, coding agents, curl — never execute JavaScript, so a page tracker would be
+blind to exactly the traffic worth counting. Usage comes from Caddy's access log, the
+successor to the ALB's S3 logs, with the same 90-day retention.
 
 ```bash
-BUCKET=$(cd terraform && terraform output -raw alb_access_logs_bucket)
-aws s3 sync "s3://$BUCKET/alb/AWSLogs/307946643562/elasticloadbalancing/us-east-1/2026/08/19/" ./alblogs/
-gunzip -c ./alblogs/*.gz > day.log
+ssh ec2-user@<ip>
+sudo ls /var/log/caddy/              # access.log plus rotated .gz files
 ```
 
-Fields are space-separated, but the interesting ones are *quoted* and contain spaces
-themselves, so splitting on whitespace only works for the leading fields. Two different
-awk separators are needed: `client:port` is whitespace field **4** and `elb_status_code`
-is **9**, while splitting on `"` puts the request line in **2** and the user agent in
-**4**. Some recipes:
+It is JSON, one object per request, so `jq` does what `awk` did against the ALB format:
 
 ```bash
-# unique visitors in this day
-awk '{print $4}' day.log | cut -d: -f1 | sort -u | wc -l
+cd /var/log/caddy
 
-# busiest addresses -- a caller appearing across several synced days is your repeat traffic
-awk '{print $4}' day.log | cut -d: -f1 | sort | uniq -c | sort -rn | head -20
+# unique visitors in the current log
+sudo jq -r '.request.client_ip' access.log | sort -u | wc -l
+
+# busiest addresses -- a caller appearing across several days is your repeat traffic
+sudo jq -r '.request.client_ip' access.log | sort | uniq -c | sort -rn | head -20
 
 # what symbols people ask for -- the actual product-usage signal
-grep -o 'symbols\?=[^& "]*' day.log | sed 's/.*=//' | tr ',' '\n' | sort | uniq -c | sort -rn
+sudo jq -r '.request.uri' access.log | grep -o 'symbols\?=[^& ]*' | sed 's/.*=//' \
+  | tr ',' '\n' | sort | uniq -c | sort -rn
 
-# who is calling, minus health checkers and WordPress vulnerability scanners
-grep -v 'ELB-HealthChecker\|wp-\|xmlrpc' day.log | awk -F'"' '{print $4}' | sort | uniq -c | sort -rn
+# who is calling, minus the vulnerability scanners
+sudo jq -r '.request.headers["User-Agent"][0] // "-"' access.log \
+  | grep -v 'wp-\|xmlrpc' | sort | uniq -c | sort -rn
 
-# endpoints, with the query string stripped
-awk -F'"' '{print $2}' day.log | awk '{print $2}' | sed 's/?.*//' | sort | uniq -c | sort -rn
+# endpoints, query strings stripped
+sudo jq -r '.request.uri' access.log | sed 's/?.*//' | sort | uniq -c | sort -rn
 ```
 
 **Discount the site's own traffic.** `frontend/src/ribbon.js` opens an SSE stream for its
@@ -258,108 +341,41 @@ counts are mostly the landing page calling itself. Outside usage is the residue:
 unfamiliar symbols, lowercase input, and non-browser user agents (`python-httpx`, `curl`,
 `okhttp`, custom agent strings).
 
-If the corpus does outgrow grep, AWS publishes the Athena `CREATE EXTERNAL TABLE` DDL for
-this exact log format —
-[Query ALB logs with Athena](https://docs.aws.amazon.com/athena/latest/ug/application-load-balancer-logs.html).
-
-### Reading pod logs
+To keep anything long-term, copy it off the box. This is the one place the old S3 bucket
+was genuinely better:
 
 ```bash
-kubectl logs -l app=api --tail=100      # one line per request, health checks excluded
-kubectl logs -l app=frontend --tail=100 # nginx combined format; client IP is the last field
+scp "ec2-user@<ip>:/var/log/caddy/access.log*" ./logs/
 ```
-
-The API line is emitted by `cuckoo_middleware` in `api/api.py`, not uvicorn — uvicorn's
-own access log reports the socket peer, which behind the ALB is a load balancer ENI in
-`10.0.0.0/16` and identical for every caller. The middleware reads `X-Forwarded-For`
-instead (last entry — the ALB appends the address it actually saw, so earlier entries are
-caller-supplied and forgeable).
 
 ## Tearing everything down
 
-Reverse the setup steps, in order. Step 4 was the last thing you did (bootstrap ArgoCD), so
-it's the first thing to undo — **before** touching the Ingress:
-
 ```bash
-# undo step 4: stop ArgoCD from managing the app
-kubectl delete -f argocd/root-app.yaml
-
-# undo the Ingress: now nothing will bring it back
-kubectl delete ingress --all
-kubectl get ingress          # wait until empty, ~1 min
-
-# undo step 1: everything else
-cd terraform
+cd infra
 terraform destroy
 ```
 
-**The `kubectl delete -f argocd/root-app.yaml` step is the one that matters.** Without it,
-deleting the Ingress by hand doesn't work, because ArgoCD puts it right back. `syncPolicy`
-in `argocd/root-app.yaml` has `selfHeal: true`, so ArgoCD sees the Ingress missing from the
-cluster, re-applies it from `k8s/` within seconds, and the load balancer controller obediently
-builds a brand new ALB — which Terraform has no idea exists, since it never created it.
-CloudTrail from one such attempt:
+Two minutes, and no ordering traps — there is no reconciler fighting you and nothing
+creates AWS resources out from under Terraform. The ECR repos are `force_delete = true`,
+so their images go with them.
 
-```
-20:50:02  DeleteLoadBalancer   ← kubectl delete ingress
-20:50:24  CreateLoadBalancer   ← ArgoCD re-synced, 22s later
-20:50:59  DeleteLoadBalancer   ← tried again
-20:51:10  CreateLoadBalancer   ← and again, 11s later
-```
-
-You can't win that race by hand — the desired state lives in git, and the reconciler always
-wins. Deleting the Application first removes the reconciler from the picture, so the Ingress
-deletion sticks and `kubectl get ingress` coming back empty is trustworthy again.
-
-`kubectl delete -f argocd/root-app.yaml` just removes ArgoCD's tracking of the app — no
-`resources-finalizer` is set on it, so it doesn't cascade-delete anything itself. The actual
-teardown of Deployments/Services/Ingress still happens the normal way, in the step after.
-
-Expect 15–20 minutes for `terraform destroy` — the node group and control plane are genuinely
-slow to delete. Don't kill it partway: an interrupted destroy can remove the NAT gateway while
-the nodes are still running, which strands the kubelets and leaves namespaces stuck
-`Terminating` forever.
-
-### Cleaning up after a destroy that already failed this way
-
-If you're reading this after already hitting the `DependencyViolation` error, the cluster and
-ArgoCD are already gone — nothing is fighting you anymore, so just delete the orphaned ALB
-directly and re-run destroy:
+The one thing worth checking afterwards is the **Elastic IP**. Attached to a running
+instance it is free; left allocated with nothing attached it bills by the hour.
+`terraform destroy` releases it, but if you ever terminate the instance by hand without
+destroying, that address is the thing that quietly keeps charging you:
 
 ```bash
-aws elbv2 describe-load-balancers --query 'LoadBalancers[].LoadBalancerArn' --output text
-aws elbv2 delete-load-balancer --load-balancer-arn <arn>
-
-cd terraform
-terraform destroy
-```
-
-Give it a minute or two after the delete for the ALB's ENIs to detach before retrying destroy.
-
-The ECR repos are `force_delete = true`, so Terraform empties them for you — no need to
-delete image tags by hand (which stopped being practical once CI started tagging by SHA).
-
-Destroying does **not** touch anything in `argocd/root-app.yaml` or `k8s/` (they're just
-files in git) — after re-provisioning, redo step 4 to re-seed ArgoCD.
-
-## ArgoCD access
-
-```bash
-# admin password
-kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d
-
-# UI
-kubectl -n argocd port-forward svc/argocd-server 8080:443
-# open https://localhost:8080, log in as admin
+aws ec2 describe-addresses --query 'Addresses[?AssociationId==`null`]'
 ```
 
 ## Repo layout
 
 ```
-terraform/    infra as code — networking, cluster, registry, loadbalancer, gitops, cicd modules
-.github/      build-and-deploy workflow (builds images, bumps the tags in k8s/)
-argocd/       one-time bootstrap Application (applied manually, not synced by ArgoCD itself)
-k8s/          app manifests ArgoCD actually syncs — Deployments, Services, Ingress
+infra/        all infrastructure — flat, no modules: network, instance, registry, cicd, dns
+deploy/       what runs on the box — compose file, Caddyfile, and the update script
+.github/      build-and-push workflow (no deploy step; the box polls)
 api/          FastAPI backend + Dockerfile
-frontend/     React frontend + Dockerfile
+frontend/     static frontend + nginx Dockerfile
 ```
+
+Not on this branch, by design: `terraform/`, `k8s/`, `argocd/`. Those are on `main`.

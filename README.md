@@ -250,10 +250,15 @@ instead. Project orientation for humans and AI assistants:
 
 ## How it runs
 
-EKS + ArgoCD GitOps + Terraform, deployed automatically on every push to
-`main` via GitHub Actions with OIDC (no stored cloud keys). The whole
-pipeline is in this repo — the rebuild-from-nothing runbook is
-[docs/QUICK_START.md](docs/QUICK_START.md).
+One small EC2 instance running three containers behind Caddy, provisioned by
+Terraform. GitHub Actions builds images into ECR via OIDC (no stored cloud
+keys), and the instance reconciles itself against git and the registry every
+five minutes. The whole pipeline is in this repo — the rebuild-from-nothing
+runbook is [docs/QUICK_START.md](docs/QUICK_START.md).
+
+The `main` branch carries a full EKS + ArgoCD GitOps build of the same
+application. It is kept as a reference implementation and no longer deploys;
+this branch is what serves the site, for about 6% of what the cluster cost.
 
 ## Disclaimer
 

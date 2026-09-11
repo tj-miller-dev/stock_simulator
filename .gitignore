@@ -1,0 +1,13 @@
+# The EKS stack's Terraform state, credentials, and provider cache still live in
+# terraform/ on this branch, even though its .tf files -- and the .gitignore that
+# used to sit beside them protecting these -- exist only on `main`.
+#
+# They have to stay on disk: terraform.tfstate is what step 0 of the runbook
+# destroys the cluster with, and terraform.tfvars holds live AWS access keys.
+# Without this rule a plain `git add -A` on this branch stages an access key and
+# a few hundred MB of provider binaries into a public repo.
+#
+# Do not "clean this up" by deleting terraform/ until the decommission in
+# docs/QUICK_START.md step 0 has actually been run. Losing that state file means
+# hunting down every cluster resource by hand.
+terraform/

@@ -1,0 +1,54 @@
+# The edge. Replaces, all at once: the ALB, its ACM certificate, the AWS Load
+# Balancer Controller, ExternalDNS, and both Ingress objects. Certificates are
+# obtained and renewed from Let's Encrypt automatically -- there is nothing to
+# rotate and nothing to remember.
+#
+# git is authoritative for this file: update.sh runs `git reset --hard` every
+# five minutes, so edit it with a push. An edit made on the box survives exactly
+# until the next tick.
+
+{
+	email {$ACME_EMAIL}
+}
+
+# www redirects rather than serving a second copy of the site. The landing page
+# is load-bearing for search and LLM citation, and two hostnames serving
+# identical content splits that signal for no benefit.
+www.{$DOMAIN} {
+	redir https://{$DOMAIN}{uri} permanent
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	handle /api/* {
+		# Disables response buffering outright. Caddy does detect
+		# text/event-stream and stream it, but /api/v1/stream is the product's
+		# live demo and "the hero demo buffers" is not a thing worth leaving to
+		# autodetection. Note what is *not* needed here: the ALB's 60s idle
+		# timeout is gone, so the stream's heartbeats are now only good manners
+		# toward intermediaries rather than a hard requirement.
+		flush_interval -1
+		reverse_proxy api:8000
+	}
+
+	handle {
+		reverse_proxy frontend:80
+	}
+
+	# Successor to the ALB's S3 access logs, and the only durable record of who
+	# calls this service: the API cannot see past this proxy, and container
+	# stdout dies with the container. 90 days matches the retention the S3
+	# lifecycle rule enforced, which also bounds how long client IPs are kept.
+	#
+	# Unlike S3, this lives on the instance's own disk -- if the box is lost, so
+	# is the history. That is the one real thing given up in this migration.
+	log {
+		output file /var/log/caddy/access.log {
+			roll_size     10MiB
+			roll_keep     20
+			roll_keep_for 2160h
+		}
+		format json
+	}
+}

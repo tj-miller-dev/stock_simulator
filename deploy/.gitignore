@@ -1,0 +1,2 @@
+# Written by Terraform on first boot -- registry account, domain, ACME contact.
+.env

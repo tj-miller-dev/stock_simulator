@@ -1,6 +1,9 @@
 # GitHub's OIDC identity provider. Lets a workflow run in this repo trade its
 # short-lived Actions token for AWS credentials -- no access keys sitting in
 # GitHub secrets, nothing to rotate.
+#
+# Unchanged from the EKS stack except for which branch is trusted: deploys now
+# come from var.deploy_branch, not `main`.
 resource "aws_iam_openid_connect_provider" "github" {
   url            = "https://token.actions.githubusercontent.com"
   client_id_list = ["sts.amazonaws.com"]
@@ -38,7 +41,7 @@ data "aws_iam_policy_document" "assume_role" {
     # GitHub now issues *immutable* subject claims, which splice the numeric
     # owner and repo IDs into the path:
     #
-    #   repo:tj-miller-dev@204254190/stock_simulator@1335562161:ref:refs/heads/main
+    #   repo:tj-miller-dev@204254190/stock_simulator@1335562161:ref:refs/heads/...
     #
     # rather than the older `repo:owner/name:ref:...`. The IDs survive renames,
     # so a claim can't be hijacked by someone re-registering an abandoned org or
@@ -61,7 +64,7 @@ data "aws_iam_policy_document" "assume_role" {
 }
 
 resource "aws_iam_role" "github_actions" {
-  name               = "${var.cluster_name}-github-actions"
+  name               = "${var.name}-github-actions"
   assume_role_policy = data.aws_iam_policy_document.assume_role.json
 }
 
@@ -75,10 +78,10 @@ data "aws_iam_policy_document" "ecr_push" {
     resources = ["*"]
   }
 
-  # Everything that actually touches image data is pinned to the two repos the
-  # registry module creates. Note there is no ecr:BatchDeleteImage here: CI
-  # pushes new tags, it never removes old ones. The lifecycle policy handles
-  # expiry, so a compromised workflow token can't wipe the registry.
+  # Everything that actually touches image data is pinned to the two repos above.
+  # Note there is no ecr:BatchDeleteImage here: CI pushes new tags, it never
+  # removes old ones. The lifecycle policy handles expiry, so a compromised
+  # workflow token can't wipe the registry.
   statement {
     sid    = "PushImages"
     effect = "Allow"
@@ -90,7 +93,7 @@ data "aws_iam_policy_document" "ecr_push" {
       "ecr:PutImage",
       "ecr:UploadLayerPart",
     ]
-    resources = var.ecr_repository_arns
+    resources = [for r in aws_ecr_repository.this : r.arn]
   }
 }
 

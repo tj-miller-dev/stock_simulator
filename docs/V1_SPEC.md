@@ -161,9 +161,11 @@ agents — and it's curl-able, which is its own documentation.
   - `clock=demo` (**default**): always-open synthetic session — the stream is alive at
     11pm on a Sunday. This is what the landing page uses.
   - `clock=real`: follows the NYSE calendar; silent while the market is closed.
-- Heartbeat comment every ~15s — **required**, because the ALB idle timeout (default
-  60s) will otherwise kill quiet streams (`HALTS` goes silent by design). Also raise
-  the ALB idle timeout via the `load-balancer-attributes` ingress annotation.
+- Heartbeat comment every ~15s. This was **required** under the ALB, whose 60s idle
+  timeout killed quiet streams (`HALTS` goes silent by design), and the annotation that
+  raised that timeout is gone with the ingress. Caddy imposes no idle timeout, so the
+  heartbeat is now insurance against intermediaries rather than against our own edge —
+  keep it: it costs nothing and the constraint returns the moment a CDN or proxy does.
 - Per-IP concurrent connection cap (~5). Event format documented in the docs page.
 
 ### 3.3 Hygiene and the agent surface
@@ -192,8 +194,10 @@ agents — and it's curl-able, which is its own documentation.
   whose `end` is in the past gets `Cache-Control: public, max-age=31536000, immutable`.
   A CDN in front becomes nearly free scaling later; no code changes needed now beyond
   the header.
-- Existing size caps stay (50 symbols, 10k bars); add probes and resource
-  requests/limits to `k8s/api.yaml` (both currently absent).
+- Existing size caps stay (50 symbols, 10k bars). Probes and resource limits now live
+  in `deploy/docker-compose.yml` — a `healthcheck` on the api container and a
+  `mem_limit` on all three, which on a 1 GiB box is what stops one container from
+  taking the others down with it.
 
 ## 5. The synthetic disclaimer (non-negotiable)
 
@@ -258,8 +262,9 @@ Dark trading-terminal, executed with restraint; the cuckoo carries the personali
 - **Container image on GHCR** (`docker run -p 8000:8000 ghcr.io/...`): serious CI
   users won't depend on a stranger's cluster; self-hosting is a feature. Add a publish
   job to the workflow.
-- Repo rename to match the brand: optional, deliberate chore (touches the ArgoCD repo
-  URL and workflow self-references; OIDC trust survives — it pins numeric IDs).
+- Repo rename to match the brand: optional, deliberate chore (touches `var.repo_url`
+  in `infra/`, the clone already on the instance, and workflow self-references; OIDC
+  trust survives — it pins numeric IDs).
 
 ## 8. Explicitly out of V1
 

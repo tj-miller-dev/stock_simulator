@@ -144,8 +144,9 @@ publishing decision, so they are deliberately left alone:
 - [ ] **A PyPI/npm shim** that wraps the base-URL swap. Small, but it puts the
       project in two more indexes that aggregators read.
 - [ ] **Repo rename** to match the brand (`stock_simulator` → `cuckootrade`).
-      Named as optional in V1_SPEC §7; it touches the ArgoCD repo URL and the
-      workflow self-references. OIDC trust survives — it pins numeric IDs.
+      Named as optional in V1_SPEC §7; it touches `var.repo_url` in `infra/`, the
+      clone on the instance, and the workflow self-references. OIDC trust
+      survives — it pins numeric IDs.
 - [ ] **Tutorial/educator outreach.** The pitch for them is specific: student
       setup friction and expired API keys in old videos both disappear against a
       keyless endpoint that returns the same data forever.
