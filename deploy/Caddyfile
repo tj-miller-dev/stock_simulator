@@ -34,8 +34,9 @@ www.{$DOMAIN} {
 		# autodetection. Note what is *not* needed here: the ALB's 60s idle
 		# timeout is gone, so the stream's heartbeats are now only good manners
 		# toward intermediaries rather than a hard requirement.
-		flush_interval -1
-		reverse_proxy api:8000
+		reverse_proxy api:8000 {
+			flush_interval -1
+		}
 	}
 
 	handle {
@@ -51,8 +52,8 @@ www.{$DOMAIN} {
 	# is the history. That is the one real thing given up in this migration.
 	log {
 		output file /var/log/caddy/access.log {
-			roll_size     10MiB
-			roll_keep     20
+			roll_size 10MiB
+			roll_keep 20
 			roll_keep_for 2160h
 		}
 		format json
