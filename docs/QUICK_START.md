@@ -69,9 +69,20 @@ ssh-keygen -t ed25519 -C cuckootrade -f ~/.ssh/cuckootrade
 ```hcl
 aws_access_key    = "..."
 aws_secret_key    = "..."
-acme_email        = "you@example.com"                  # Let's Encrypt expiry warnings
 ssh_allowed_cidrs = ["x.x.x.x/32"]                     # curl https://checkip.amazonaws.com
 ssh_public_key    = "ssh-ed25519 AAAA... cuckootrade"  # contents of the .pub file
+```
+
+There is deliberately no ACME contact address here. Caddy registers an anonymous
+Let's Encrypt account, which issues and renews the same certificates; the only thing
+given up is that Let's Encrypt has no address to warn if renewal ever breaks. To add
+one, put a global options block at the top of `deploy/Caddyfile` and push — no rebuild
+needed, the box picks up `deploy/` changes on its next tick:
+
+```
+{
+    email you@example.com
+}
 ```
 
 Only the public half of the key goes in here, so Terraform never holds a private key in
@@ -165,7 +176,7 @@ terraform apply
 
 You need `infra/terraform.tfvars` first — see [Prerequisites](#prerequisites). It is a
 different variable set from the EKS stack's: same two AWS keys, but `public_access_cidrs`
-becomes `ssh_allowed_cidrs`, and `ssh_public_key` and `acme_email` are new.
+becomes `ssh_allowed_cidrs`, and `ssh_public_key` is new.
 
 Takes about two minutes — there is no control plane to wait for any more. Note the
 outputs: `public_ip`, `ssh`, `site_url`, `github_actions_role_arn`.

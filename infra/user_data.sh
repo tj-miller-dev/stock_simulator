@@ -74,7 +74,6 @@ fi
 cat > /opt/cuckootrade/deploy/.env <<'ENVEOF'
 ECR_REGISTRY=${ecr_registry}
 DOMAIN=${domain_name}
-ACME_EMAIL=${acme_email}
 ENVEOF
 
 # Caddy writes access logs here through a bind mount, so they outlive any

@@ -67,13 +67,18 @@ resource "aws_instance" "this" {
     deploy_branch = var.deploy_branch
     ecr_registry  = local.ecr_registry
     domain_name   = var.domain_name
-    acme_email    = var.acme_email
   })
 
   # user_data runs only on first boot, so a change to it is a change to the
   # machine image in every sense that matters -- replace the instance rather
   # than leaving a running box that no longer matches its own definition.
   user_data_replace_on_change = true
+
+  # Nothing else ties the instance to its egress rule, so Terraform is free to
+  # boot it first -- and a box whose security group has no egress yet cannot
+  # install docker, clone the repo, or reach ECR. user_data would burn through
+  # its retries and give up, leaving a running instance that never converges.
+  depends_on = [aws_vpc_security_group_egress_rule.all]
 
   tags = {
     Name = var.name

@@ -108,7 +108,7 @@ resource "aws_vpc_security_group_ingress_rule" "ssh" {
 
 resource "aws_vpc_security_group_egress_rule" "all" {
   security_group_id = aws_security_group.instance.id
-  description       = "Pull images from ECR, config from GitHub, certificates from Let's Encrypt"
+  description       = "Outbound to ECR, GitHub, and the ACME certificate authority"
   ip_protocol       = "-1"
   cidr_ipv4         = "0.0.0.0/0"
 }

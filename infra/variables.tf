@@ -28,15 +28,6 @@ variable "domain_name" {
   default     = "cuckootrade.com"
 }
 
-variable "acme_email" {
-  description = <<-EOT
-    Contact address Caddy registers with Let's Encrypt. Used for expiry warnings if
-    renewal ever breaks. Required, and set in terraform.tfvars rather than defaulted
-    here so a personal address doesn't live in a public repo.
-  EOT
-  type        = string
-}
-
 variable "ssh_allowed_cidrs" {
   description = <<-EOT
     CIDR blocks allowed to reach port 22 -- e.g. your IP as a /32. This is the only

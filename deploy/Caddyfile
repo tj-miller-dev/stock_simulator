@@ -7,9 +7,15 @@
 # five minutes, so edit it with a push. An edit made on the box survives exactly
 # until the next tick.
 
-{
-	email {$ACME_EMAIL}
-}
+# No global options block, and in particular no `email`. Caddy registers an
+# anonymous ACME account, which issues and renews exactly the same certificates;
+# the only thing given up is that Let's Encrypt has no address to warn if renewal
+# ever breaks. To add one, put this at the top of this file and push -- the box
+# picks up deploy/ changes on its next tick, no rebuild needed:
+#
+#     {
+#         email you@example.com
+#     }
 
 # www redirects rather than serving a second copy of the site. The landing page
 # is load-bearing for search and LLM citation, and two hostnames serving

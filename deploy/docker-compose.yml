@@ -16,7 +16,6 @@ services:
       - "443:443"
     environment:
       DOMAIN: ${DOMAIN:?set in deploy/.env}
-      ACME_EMAIL: ${ACME_EMAIL:?set in deploy/.env}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       # Certificates and the ACME account key. Losing this volume means
